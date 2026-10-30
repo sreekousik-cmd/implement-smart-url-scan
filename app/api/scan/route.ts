@@ -2,9 +2,10 @@ import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import { connect as tlsConnect } from 'node:tls'
 import { NextResponse } from 'next/server'
+import { TRUSTED_BRAND_DOMAINS, TRUSTED_BRANDS } from '@/lib/trusted-brands'
 
 const PRIVATE_HOST = /^(localhost|.*\.local|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[0-1])\.|0\.)/i
-const COMMON_BRANDS = ['google.com', 'paypal.com', 'microsoft.com', 'apple.com', 'amazon.com', 'facebook.com', 'instagram.com', 'netflix.com']
+const COMMON_BRANDS = TRUSTED_BRAND_DOMAINS
 const CHECK_TIMEOUT_MS = 7000
 const MULTI_LABEL_SUFFIXES = new Set(['co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au', 'co.jp', 'co.nz', 'co.za'])
 
@@ -174,6 +175,49 @@ async function checkReputation(normalizedUrl: string): Promise<Indicator> {
   }
 }
 
+function matchesDomainBoundary(hostname: string, domain: string) {
+  return hostname === domain || hostname.endsWith(`.${domain}`)
+}
+
+function checkTrustedBrand(hostname: string, registrable: string): Indicator {
+  const approvedMatch = TRUSTED_BRANDS
+    .flatMap((brand) => brand.approvedDomains.map((domain) => ({ brand, domain })))
+    .filter(({ domain }) => matchesDomainBoundary(hostname, domain))
+    .sort((left, right) => right.domain.length - left.domain.length)[0]
+
+  if (approvedMatch) {
+    const scope = hostname === approvedMatch.domain ? 'exact official-domain match' : `approved subdomain of ${approvedMatch.domain}`
+    return {
+      label: 'Trusted brand reputation',
+      status: 'passed',
+      explanation: `${approvedMatch.brand.name} is listed in the editable trusted-brand registry, but provider warnings still take precedence.`,
+      evidence: `Verified ${approvedMatch.brand.name} ${scope}; primary domain: ${approvedMatch.brand.primaryDomain}.`,
+    }
+  }
+
+  const lookalike = TRUSTED_BRANDS
+    .flatMap((brand) => brand.approvedDomains.map((domain) => ({ brand, domain })))
+    .map(({ brand, domain }) => ({ brand, domain, distance: levenshtein(registrable, domain) }))
+    .filter(({ distance }) => distance > 0 && distance <= 2)
+    .sort((left, right) => left.distance - right.distance)[0]
+
+  if (lookalike) {
+    return {
+      label: 'Trusted brand reputation',
+      status: 'warning',
+      explanation: `This domain resembles ${lookalike.brand.name}, but it is not an approved official domain. Treat it as a possible impersonation attempt.`,
+      evidence: `No official match for ${registrable}; closest registered brand domain: ${lookalike.domain} (edit distance ${lookalike.distance}).`,
+    }
+  }
+
+  return {
+    label: 'Trusted brand reputation',
+    status: 'unavailable',
+    explanation: 'Unknown — this domain is not in the trusted-brand registry. Live threat-intelligence checks remain authoritative.',
+    evidence: `No approved brand domain matched ${hostname}; absence from the registry is not a threat finding.`,
+  }
+}
+
 function analyzeUrl(parsed: ParsedUrl): Indicator {
   const { url, hostname, registrable } = parsed
   const labels = hostname.split('.')
@@ -199,6 +243,7 @@ async function scanUrl(input: string) {
     checkSsl(parsed.hostname, parsed.url.protocol),
     checkUrlhaus(parsed.url.toString()),
     analyzeUrl(parsed),
+    checkTrustedBrand(parsed.hostname, parsed.registrable),
     checkReputation(parsed.url.toString()),
   ])
   const failed = indicators.filter((item) => item.status === 'failed').length
