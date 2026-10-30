@@ -69,20 +69,23 @@ export default function Page() {
   }
 
   async function compressScreenshot(file: File) {
-    if (file.size <= 2 * 1024 * 1024) return file
+    if (file.size <= 4.5 * 1024 * 1024) return file
     const sourceUrl = URL.createObjectURL(file)
     try {
       const image = new Image()
       image.crossOrigin = 'anonymous'
       image.src = sourceUrl
-      await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error('Unable to read screenshot')) })
-      const scale = Math.min(1, 1600 / Math.max(image.naturalWidth, image.naturalHeight))
+      await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error('Unable to read screenshot for OCR.')) })
+      const scale = Math.min(1, 2400 / Math.max(image.naturalWidth, image.naturalHeight))
       const canvas = document.createElement('canvas')
       canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
       canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
-      canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height)
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.78))
-      return blob ? new File([blob], `${file.name.replace(/\.[^.]+$/, '')}.jpg`, { type: 'image/jpeg' }) : file
+      const context = canvas.getContext('2d')
+      if (!context) return file
+      context.drawImage(image, 0, 0, canvas.width, canvas.height)
+      const outputType = file.type === 'image/webp' ? 'image/webp' : 'image/jpeg'
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, outputType, 0.88))
+      return blob ? new File([blob], `${file.name.replace(/\.[^.]+$/, '')}.${outputType === 'image/webp' ? 'webp' : 'jpg'}`, { type: outputType }) : file
     } finally {
       URL.revokeObjectURL(sourceUrl)
     }

@@ -15,7 +15,8 @@ type OCRReport = {
 }
 
 function cleanReport(value: unknown): OCRReport {
-  const source = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const candidate = Array.isArray(value) ? value[0] : value
+  const source = candidate && typeof candidate === 'object' ? candidate as Record<string, unknown> : {}
   const strings = (input: unknown) => Array.isArray(input) ? input.filter((item): item is string => typeof item === 'string').slice(0, 40) : []
   const changed = Array.isArray(source.changedText) ? source.changedText.slice(0, 30).map((item) => {
     const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
@@ -41,35 +42,48 @@ export async function POST(request: Request) {
   const official = form.get('official')
   if (!(suspicious instanceof File) || !(official instanceof File)) return NextResponse.json({ error: 'Upload both screenshots.' }, { status: 400 })
   for (const file of [suspicious, official]) {
-    if (!ALLOWED_TYPES.has(file.type) || file.size > MAX_BYTES) return NextResponse.json({ error: 'Use PNG, JPEG, or WebP images up to 8 MB each.' }, { status: 400 })
+    if (!ALLOWED_TYPES.has(file.type) || file.size > MAX_BYTES) return NextResponse.json({ error: 'Use PNG, JPEG, or WebP images up to 5 MB each.' }, { status: 400 })
   }
 
   const toData = async (file: File) => ({ mimeType: file.type, data: Buffer.from(await file.arrayBuffer()).toString('base64') })
   const [suspiciousImage, officialImage] = await Promise.all([toData(suspicious), toData(official)])
   const prompt = `You are doing OCR and a cautious text comparison. Extract only clearly visible text from image 1 (suspicious) and image 2 (official). Compare brand names, headings, navigation, buttons, alerts, and messages. Return ONLY valid JSON with this shape: {"suspiciousText":[],"officialText":[],"matchingText":[],"changedText":[{"suspicious":"","official":"","reason":""}],"missingText":[{"text":"","presentOn":"suspicious|official"}],"highlights":[],"note":""}. Do not infer hidden text or declare phishing. Keep arrays concise. Image 1 follows, then image 2.`
-  const body = { contents: [{ parts: [{ text: prompt }, { inlineData: suspiciousImage }, { inlineData: officialImage }] }], generationConfig: { temperature: 0, maxOutputTokens: 400, responseMimeType: 'application/json' } }
+  const body = { contents: [{ parts: [{ text: prompt }, { inlineData: suspiciousImage }, { inlineData: officialImage }] }], generationConfig: { temperature: 0, maxOutputTokens: 1200, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'minimal' } } }
 
   try {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${encodeURIComponent(key)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) })
     const payload = await response.json().catch(() => null)
     if (!response.ok) {
-      console.error('[v0] OCR Gemini error', { status: response.status, message: payload?.error?.message || 'Unknown upstream error' })
-      return NextResponse.json({ error: 'OCR comparison is temporarily unavailable.' }, { status: 502 })
+      const upstreamMessage = typeof payload?.error?.message === 'string' ? payload.error.message : `OCR provider returned HTTP ${response.status}.`
+      console.error('[v0] OCR Gemini error', { status: response.status, message: upstreamMessage })
+      return NextResponse.json({ error: upstreamMessage }, { status: 502 })
     }
-    const text = payload?.candidates?.[0]?.content?.parts?.find((part: { text?: string }) => part.text)?.text
+    const parts = payload?.candidates?.[0]?.content?.parts
+    const textParts = Array.isArray(parts)
+      ? parts.filter((part: { text?: unknown; thought?: boolean }) => typeof part?.text === 'string' && !part.thought).map((part: { text: string }) => part.text)
+      : []
+    const text = textParts.at(-1) || (Array.isArray(parts) ? parts.find((part: { text?: unknown }) => typeof part?.text === 'string')?.text : undefined)
     if (!text) return NextResponse.json({ error: 'No readable text was detected.' }, { status: 422 })
     try {
       const normalized = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
-      const jsonStart = normalized.indexOf('{')
-      const jsonEnd = normalized.lastIndexOf('}')
-      const jsonText = jsonStart >= 0 && jsonEnd > jsonStart ? normalized.slice(jsonStart, jsonEnd + 1) : normalized
-      return NextResponse.json({ report: cleanReport(JSON.parse(jsonText)) })
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(normalized)
+      } catch {
+        const jsonStart = normalized.indexOf('{')
+        const jsonEnd = normalized.lastIndexOf('}')
+        const jsonText = jsonStart >= 0 && jsonEnd > jsonStart ? normalized.slice(jsonStart, jsonEnd + 1) : normalized
+        parsed = JSON.parse(jsonText)
+      }
+      return NextResponse.json({ report: cleanReport(parsed) })
     } catch {
-      console.error('[v0] OCR Gemini returned invalid JSON', { preview: text.slice(0, 160) })
+      console.error('[v0] OCR Gemini returned invalid JSON', { message: 'Model response was not valid structured OCR JSON' })
       return NextResponse.json({ report: cleanReport({ note: 'OCR could not reliably parse the returned text. Try clearer screenshots.' }), warning: 'OCR returned no reliable structured differences.' })
     }
   } catch (error) {
-    console.error('[v0] OCR request failed', { message: error instanceof Error ? error.message : 'Unknown request error' })
-    return NextResponse.json({ error: 'OCR comparison timed out. Try clearer screenshots.' }, { status: 504 })
+    const message = error instanceof Error ? error.message : 'Unknown request error'
+    const timedOut = message.toLowerCase().includes('abort') || message.toLowerCase().includes('timeout')
+    console.error('[v0] OCR request failed', { message })
+    return NextResponse.json({ error: timedOut ? 'OCR comparison timed out after 30 seconds.' : `OCR request failed: ${message}` }, { status: timedOut ? 504 : 502 })
   }
 }
