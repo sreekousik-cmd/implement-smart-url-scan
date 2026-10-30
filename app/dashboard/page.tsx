@@ -41,7 +41,7 @@ export default function DashboardPage() {
       </header>
 
       <section className="mx-auto max-w-5xl px-6 pb-16 pt-10 sm:pt-16">
-        <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end"><div><p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">FindFake AI</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">Security dashboard</h1><p className="mt-4 max-w-xl text-base leading-7 text-slate-500">A clear view of your saved scans, risk trends, and recent reports.</p></div><div className="flex gap-2"><QuickAction href="/" icon={<ScanLine size={16} />} label="Scan a URL" /><QuickAction href="/#comparison-heading" icon={<BarChart3 size={16} />} label="Compare screenshots" /></div></div>
+        <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end"><div><p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">FindFake AI</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">Security dashboard</h1><p className="mt-4 max-w-xl text-base leading-7 text-slate-500">A clear view of your saved scans, risk trends, and recent reports.</p></div><div className="flex gap-2"><QuickAction href="/" icon={<ScanLine size={16} />} label="Enter URL" /><QuickAction href="/#comparison-heading" icon={<BarChart3 size={16} />} label="Compare screenshots" /></div></div>
 
         {error && <div role="alert" className="mt-8 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
         {loading ? <p className="mt-10 text-sm text-slate-500">Loading dashboard data…</p> : data && <>
