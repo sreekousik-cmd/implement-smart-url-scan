@@ -193,7 +193,7 @@ export default function Page() {
   }
 
   return (
-    <main className="min-h-screen bg-[#0B1220] bg-[radial-gradient(circle_at_50%_0%,rgba(20,43,74,0.72),transparent_42%),linear-gradient(rgba(75,108,145,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(75,108,145,0.08)_1px,transparent_1px)] bg-[size:auto,32px_32px,32px_32px] text-slate-100">
+    <main className="min-h-screen bg-[#071A17] bg-[radial-gradient(circle_at_50%_0%,rgba(15,61,51,0.72),transparent_42%),linear-gradient(rgba(68,126,111,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(68,126,111,0.08)_1px,transparent_1px)] bg-[size:auto,32px_32px,32px_32px] text-slate-100">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-6 py-7">
         <Link href="/" className="flex items-center gap-2.5"><img src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-TMC6J8OtTrw06fQx00D797ADPNMbbv.png" alt="FindFake AI logo" className="h-12 w-12 rounded-lg object-cover" /><span className="text-2xl font-semibold tracking-tight sm:text-3xl">FindFake<span className="text-slate-400"> AI</span></span></Link>
         <nav className="flex items-center gap-2 text-xs font-medium sm:text-sm">
