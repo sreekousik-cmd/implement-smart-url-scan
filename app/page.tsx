@@ -197,7 +197,7 @@ export default function Page() {
       <header className="mx-auto flex max-w-5xl items-center justify-between px-6 py-7">
         <Link href="/" className="flex items-center gap-2.5"><img src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-TMC6J8OtTrw06fQx00D797ADPNMbbv.png" alt="FindFake AI logo" className="h-10 w-10 rounded-lg object-cover" /><span className="text-lg font-semibold tracking-tight">FindFake<span className="text-slate-400"> AI</span></span></Link>
         <nav className="flex items-center gap-2 text-xs font-medium sm:text-sm">
-          <span className="hidden rounded-full border border-slate-200 px-3 py-1 text-slate-500 sm:inline-flex">Smart URL Scan</span>
+          <span className="hidden rounded-full border border-slate-200 px-3 py-1 text-slate-500 sm:inline-flex">Smart Enter URL</span>
           <Link href="/dashboard" className="rounded-full bg-slate-950 px-3 py-1.5 text-white transition hover:bg-slate-800">Dashboard</Link>
         </nav>
       </header>

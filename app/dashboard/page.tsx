@@ -37,7 +37,7 @@ export default function DashboardPage() {
     <main className="min-h-screen bg-[linear-gradient(135deg,#f8fafc_0%,#eef2f5_48%,#dfe7ed_100%)] text-slate-950">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-6 py-7">
         <Link href="/" className="flex items-center gap-2.5"><img src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-TMC6J8OtTrw06fQx00D797ADPNMbbv.png" alt="FindFake AI logo" className="h-10 w-10 rounded-lg object-cover" /><span className="text-lg font-semibold tracking-tight">FindFake<span className="text-slate-400"> AI</span></span></Link>
-        <nav className="flex items-center gap-2 text-sm font-medium"><Link href="/" className="rounded-full px-3 py-1.5 text-slate-500 hover:bg-slate-100">Scan</Link><Link href="/dashboard" className="rounded-full bg-slate-950 px-3 py-1.5 text-white">Dashboard</Link></nav>
+        <nav className="flex items-center gap-2 text-sm font-medium"><Link href="/" className="rounded-full px-3 py-1.5 text-slate-500 hover:bg-slate-100">Smart Enter URL</Link><Link href="/dashboard" className="rounded-full bg-slate-950 px-3 py-1.5 text-white">Dashboard</Link></nav>
       </header>
 
       <section className="mx-auto max-w-5xl px-6 pb-16 pt-10 sm:pt-16">
