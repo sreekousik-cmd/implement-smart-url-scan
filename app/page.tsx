@@ -208,7 +208,7 @@ export default function Page() {
         <form onSubmit={handleSubmit} className="mx-auto mt-10 flex max-w-2xl flex-col gap-3 sm:flex-row">
           <label className="sr-only" htmlFor="website-url">Website URL</label>
           <input id="website-url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com" className="h-14 min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-5 text-sm outline-none transition focus:border-slate-500 focus:bg-white focus:ring-4 focus:ring-slate-100" />
-          <button disabled={loading} className="flex h-14 items-center justify-center gap-2 rounded-xl bg-slate-950 px-7 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-wait disabled:opacity-60"><Search size={17} />{loading ? 'Scanning…' : 'Scan URL'}</button>
+          <button disabled={loading} className="flex h-14 items-center justify-center gap-2 rounded-xl bg-slate-950 px-7 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-wait disabled:opacity-60"><Search size={17} />{loading ? 'Scanning…' : 'Enter URL'}</button>
         </form>
         {error && <p role="alert" className="mt-4 text-sm font-medium text-red-600">{error}</p>}
         {result && <Results result={result} explanation={explanation} loading={explanationLoading} />}
