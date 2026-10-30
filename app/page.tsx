@@ -6,7 +6,7 @@ import { AlertTriangle, Check, ChevronDown, CircleHelp, FileText, Search, Sparkl
 
 type Status = 'passed' | 'warning' | 'failed' | 'unavailable'
 type Indicator = { label: string; status: Status; explanation: string; evidence: string }
-type Result = { normalizedUrl: string; risk: string; indicators: Indicator[]; note: string }
+type Result = { normalizedUrl: string; risk: string; riskScore: number; indicators: Indicator[]; note: string }
 type Explanation = { available: boolean; explanation?: string; error?: string }
 type HistoryType = 'url_scan' | 'website_reputation' | 'visual_comparison' | 'ocr'
 type HistoryRecord = { id: string; scanType: HistoryType; scanDate: string; target: string | null; riskCategory: string; confidenceLevel: string; finalReport: string; findings: Record<string, unknown> }
@@ -148,8 +148,8 @@ export default function Page() {
         const explanationResponse = await fetch('/api/explain', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ result: data }), signal: AbortSignal.timeout(20000) })
         const explanationData = await explanationResponse.json()
         setExplanation(explanationData)
-          const report = explanationData.available ? explanationData.explanation : data.note
-          const findings = { indicators: data.indicators }
+          const report = `${explanationData.available ? explanationData.explanation : data.note}\n\nRisk score: ${data.riskScore}/100 (higher means more risk).`
+          const findings = { riskScore: data.riskScore, indicators: data.indicators }
           await saveScanHistory({
             scanType: 'url_scan',
             target: data.normalizedUrl,
@@ -169,9 +169,10 @@ export default function Page() {
       } catch {
         const fallback = { available: false, error: 'Gemma is temporarily unavailable. The scan results are still available.' }
         setExplanation(fallback)
-        const findings = { indicators: data.indicators }
-        await saveScanHistory({ scanType: 'url_scan', target: data.normalizedUrl, riskCategory: data.risk, confidenceLevel: 'Medium', finalReport: data.note, findings })
-        await saveScanHistory({ scanType: 'website_reputation', target: data.normalizedUrl, riskCategory: data.risk, confidenceLevel: 'Medium', finalReport: data.note, findings: { indicators: data.indicators.filter((item: Indicator) => ['Website reputation', 'Phishing detection', 'Trusted brand reputation'].includes(item.label)) } })
+        const report = `${data.note}\n\nRisk score: ${data.riskScore}/100 (higher means more risk).`
+        const findings = { riskScore: data.riskScore, indicators: data.indicators }
+        await saveScanHistory({ scanType: 'url_scan', target: data.normalizedUrl, riskCategory: data.risk, confidenceLevel: 'Medium', finalReport: report, findings })
+        await saveScanHistory({ scanType: 'website_reputation', target: data.normalizedUrl, riskCategory: data.risk, confidenceLevel: 'Medium', finalReport: report, findings: { riskScore: data.riskScore, indicators: data.indicators.filter((item: Indicator) => ['Website reputation', 'Phishing detection', 'Trusted brand reputation'].includes(item.label)) } })
       }
     } catch (scanError) {
     const message = scanError instanceof Error ? scanError.message : 'Unable to scan this URL.'
@@ -235,7 +236,7 @@ function HistoryPanel({ records, filter, loading, error, openId, onFilterChange,
     <div className="flex items-center justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Scan History</p><h2 id="history-heading" className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Previous reports</h2></div><FileText className="text-slate-300" size={22} /></div>
     <div className="mt-4 flex flex-wrap gap-2">{(Object.keys(labels) as Array<'all' | HistoryType>).map((key) => <button key={key} type="button" onClick={() => onFilterChange(key)} className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${filter === key ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 text-slate-500 hover:border-slate-400'}`}>{labels[key]}</button>)}</div>
     {error && <p role="alert" className="mt-4 text-sm text-amber-700">{error}</p>}
-    {loading ? <p className="mt-5 text-sm text-slate-500">Loading saved reports…</p> : records.length === 0 ? <p className="mt-5 rounded-xl border border-dashed border-slate-200 p-5 text-sm text-slate-500">No saved reports in this filter.</p> : <div className="mt-5 divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white">{records.map((record) => <div key={record.id} className="p-4"><div className="flex items-start gap-3"><button type="button" onClick={() => onToggle(openId === record.id ? null : record.id)} className="min-w-0 flex-1 text-left"><p className="text-sm font-semibold text-slate-800">{labels[record.scanType]}</p><p className="mt-1 truncate text-xs text-slate-500">{record.target || 'Saved report'}</p><p className="mt-1 text-xs text-slate-400">{new Date(record.scanDate).toLocaleString()} · {record.riskCategory} · {record.confidenceLevel} confidence</p></button><button type="button" aria-label={`Delete ${labels[record.scanType]} report`} onClick={() => onDelete(record.id)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={16} /></button></div>{openId === record.id && <div className="mt-4 border-t border-slate-100 pt-4 text-sm leading-6 text-slate-600"><p className="whitespace-pre-wrap">{record.finalReport}</p></div>}</div>)}</div>}
+    {loading ? <p className="mt-5 text-sm text-slate-500">Loading saved reports…</p> : records.length === 0 ? <p className="mt-5 rounded-xl border border-dashed border-slate-200 p-5 text-sm text-slate-500">No saved reports in this filter.</p> : <div className="mt-5 divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white">{records.map((record) => <div key={record.id} className="p-4"><div className="flex items-start gap-3"><button type="button" onClick={() => onToggle(openId === record.id ? null : record.id)} className="min-w-0 flex-1 text-left"><p className="text-sm font-semibold text-slate-800">{labels[record.scanType]}</p><p className="mt-1 truncate text-xs text-slate-500">{record.target || 'Saved report'}</p><p className="mt-1 text-xs text-slate-400">{new Date(record.scanDate).toLocaleString()} · {record.riskCategory} · {record.confidenceLevel} confidence{typeof record.findings.riskScore === 'number' ? ` · Risk score ${record.findings.riskScore}/100` : ''}</p></button><button type="button" aria-label={`Delete ${labels[record.scanType]} report`} onClick={() => onDelete(record.id)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={16} /></button></div>{openId === record.id && <div className="mt-4 border-t border-slate-100 pt-4 text-sm leading-6 text-slate-600"><p className="whitespace-pre-wrap">{record.finalReport}</p></div>}</div>)}</div>}
   </section>
 }
 
@@ -260,7 +261,7 @@ function Results({ result, explanation, loading }: { result: Result; explanation
       </div>
 
       <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_12px_40px_rgba(15,23,42,0.06)] sm:p-8">
-        <div className="flex flex-col justify-between gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-start"><div><p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Scan summary</p><p className="mt-2 break-all text-sm text-slate-600">{result.normalizedUrl}</p></div><span className={`w-fit rounded-full px-3 py-1.5 text-sm font-semibold ${concernClass}`}>{result.risk}</span></div>
+        <div className="flex flex-col justify-between gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-start"><div><p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Scan summary</p><p className="mt-2 break-all text-sm text-slate-600">{result.normalizedUrl}</p></div><div className="flex items-center gap-2"><span className="rounded-full bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-700">Risk score {result.riskScore}/100</span><span className={`w-fit rounded-full px-3 py-1.5 text-sm font-semibold ${concernClass}`}>{result.risk}</span></div></div>
         <div className="divide-y divide-slate-100">
           {result.indicators.map((item) => {
             const meta = statusMeta[item.status]

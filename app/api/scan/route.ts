@@ -251,7 +251,8 @@ async function scanUrl(input: string) {
   const hasSslWarning = indicators.some((item) => item.label === 'SSL certificate' && item.status === 'warning')
   const unavailableCount = indicators.filter((item) => item.status === 'unavailable').length
   const risk = failed > 0 ? 'High concern' : meaningfulWarnings > 0 ? 'Medium concern' : hasSslWarning || unavailableCount > 0 ? 'Inconclusive' : 'Low concern'
-  return { normalizedUrl: parsed.url.toString(), risk, indicators, note: 'These checks combine available registration, certificate, database, URL-pattern, and reputation evidence. A passed or unavailable check does not prove that a website is safe.' }
+  const riskScore = Math.min(100, indicators.reduce((score, item) => score + (item.status === 'failed' ? 35 : item.status === 'warning' ? 18 : item.status === 'unavailable' ? 8 : 0), 0))
+  return { normalizedUrl: parsed.url.toString(), risk, riskScore, indicators, note: 'These checks combine available registration, certificate, database, URL-pattern, and reputation evidence. A passed or unavailable check does not prove that a website is safe.' }
 }
 
 export async function POST(request: Request) {
