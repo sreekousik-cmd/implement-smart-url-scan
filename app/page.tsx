@@ -1,11 +1,12 @@
 'use client'
 
 import { FormEvent, useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, CircleHelp, Search, ShieldCheck, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, CircleHelp, Search, ShieldCheck, Sparkles, X } from 'lucide-react'
 
 type Status = 'passed' | 'warning' | 'failed' | 'unavailable'
 type Indicator = { label: string; status: Status; explanation: string; evidence: string }
 type Result = { normalizedUrl: string; risk: string; indicators: Indicator[]; note: string }
+type Explanation = { available: boolean; explanation?: string; error?: string }
 
 const statusMeta = {
   passed: { label: 'Passed', icon: Check, className: 'text-emerald-700 bg-emerald-50' },
@@ -19,16 +20,25 @@ export default function Page() {
   const [result, setResult] = useState<Result | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [explanation, setExplanation] = useState<Explanation | null>(null)
+  const [explanationLoading, setExplanationLoading] = useState(false)
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
-    setLoading(true); setError(''); setResult(null)
+    setLoading(true); setError(''); setResult(null); setExplanation(null)
     try {
       const response = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error)
       setResult(data)
-    } catch (scanError) { setError(scanError instanceof Error ? scanError.message : 'Unable to scan this URL.') } finally { setLoading(false) }
+      setExplanationLoading(true)
+      try {
+        const explanationResponse = await fetch('/api/explain', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ result: data }), signal: AbortSignal.timeout(20000) })
+        setExplanation(await explanationResponse.json())
+      } catch {
+        setExplanation({ available: false, error: 'Gemma is temporarily unavailable. The scan results are still available.' })
+      }
+    } catch (scanError) { setError(scanError instanceof Error ? scanError.message : 'Unable to scan this URL.') } finally { setLoading(false); setExplanationLoading(false) }
   }
 
   return (
@@ -47,19 +57,43 @@ export default function Page() {
           <button disabled={loading} className="flex h-14 items-center justify-center gap-2 rounded-xl bg-slate-950 px-7 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-wait disabled:opacity-60"><Search size={17} />{loading ? 'Scanning…' : 'Scan URL'}</button>
         </form>
         {error && <p role="alert" className="mt-4 text-sm font-medium text-red-600">{error}</p>}
-        {result && <Results result={result} />}
+        {result && <Results result={result} explanation={explanation} loading={explanationLoading} />}
       </section>
     </main>
   )
 }
 
-function Results({ result }: { result: Result }) {
-  const concernClass = result.risk === 'High concern' ? 'bg-red-50 text-red-700' : result.risk === 'Medium concern' ? 'bg-amber-50 text-amber-700' : result.risk === 'Inconclusive' ? 'bg-slate-100 text-slate-700' : 'bg-emerald-50 text-emerald-700'
-  return <section aria-live="polite" className="mx-auto mt-12 max-w-2xl text-left">
-    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_12px_40px_rgba(15,23,42,0.06)] sm:p-8">
-      <div className="flex flex-col justify-between gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-start"><div><p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Scan summary</p><p className="mt-2 break-all text-sm text-slate-600">{result.normalizedUrl}</p></div><span className={`w-fit rounded-full px-3 py-1.5 text-sm font-semibold ${concernClass}`}>{result.risk}</span></div>
-      <div className="divide-y divide-slate-100">{result.indicators.map((item) => { const meta = statusMeta[item.status]; const Icon = meta.icon; return <details key={item.label} className="group py-5 first:pb-4"><summary className="flex cursor-pointer list-none items-center gap-3"><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${meta.className}`}><Icon size={15} strokeWidth={2.5} /></span><span className="flex-1 text-sm font-semibold text-slate-800">{item.label}</span><span className={`hidden rounded-full px-2.5 py-1 text-xs font-medium sm:inline ${meta.className}`}>{meta.label}</span><ChevronDown size={16} className="text-slate-400 transition group-open:rotate-180" /></summary><div className="ml-10 mt-3 space-y-1 text-sm leading-6 text-slate-500"><p>{item.explanation}</p><p className="text-xs text-slate-400"><span className="font-semibold">Evidence:</span> {item.evidence}</p></div></details> })}</div>
-      <p className="mt-2 border-t border-slate-100 pt-5 text-xs leading-5 text-slate-400">{result.note}</p>
-    </div>
-  </section>
+function Results({ result, explanation, loading }: { result: Result; explanation: Explanation | null; loading: boolean }) {
+  const concernClass = result.risk === 'High concern'
+    ? 'bg-red-50 text-red-700'
+    : result.risk === 'Medium concern'
+      ? 'bg-amber-50 text-amber-700'
+      : result.risk === 'Inconclusive'
+        ? 'bg-slate-100 text-slate-700'
+        : 'bg-emerald-50 text-emerald-700'
+
+  return (
+    <section aria-live="polite" className="mx-auto mt-12 max-w-2xl text-left">
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6 sm:p-8">
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 text-white"><Sparkles size={17} /></span>
+          <div><p className="text-xs font-semibold uppercase tracking-widest text-slate-400">AI Security Explanation</p><p className="mt-1 text-sm text-slate-500">A cautious summary of the scan evidence.</p></div>
+        </div>
+        {loading ? <p className="mt-6 text-sm text-slate-500">Gemma is preparing an explanation…</p> : explanation?.available && explanation.explanation ? <div className="mt-6 whitespace-pre-wrap text-sm leading-7 text-slate-600">{explanation.explanation}</div> : <p className="mt-6 text-sm leading-6 text-slate-500">{explanation?.error || 'AI explanation is unavailable. Your scan results are still valid and unchanged.'}</p>}
+        <p className="mt-6 border-t border-slate-200 pt-4 text-xs leading-5 text-slate-400">AI-generated guidance is limited to the detected evidence above. It does not verify ownership or prove that a site is safe.</p>
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_12px_40px_rgba(15,23,42,0.06)] sm:p-8">
+        <div className="flex flex-col justify-between gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-start"><div><p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Scan summary</p><p className="mt-2 break-all text-sm text-slate-600">{result.normalizedUrl}</p></div><span className={`w-fit rounded-full px-3 py-1.5 text-sm font-semibold ${concernClass}`}>{result.risk}</span></div>
+        <div className="divide-y divide-slate-100">
+          {result.indicators.map((item) => {
+            const meta = statusMeta[item.status]
+            const Icon = meta.icon
+            return <details key={item.label} className="group py-5 first:pb-4"><summary className="flex cursor-pointer list-none items-center gap-3"><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${meta.className}`}><Icon size={15} strokeWidth={2.5} /></span><span className="flex-1 text-sm font-semibold text-slate-800">{item.label}</span><span className={`hidden rounded-full px-2.5 py-1 text-xs font-medium sm:inline ${meta.className}`}>{meta.label}</span><ChevronDown size={16} className="text-slate-400 transition group-open:rotate-180" /></summary><div className="ml-10 mt-3 space-y-1 text-sm leading-6 text-slate-500"><p>{item.explanation}</p><p className="text-xs text-slate-400"><span className="font-semibold">Evidence:</span> {item.evidence}</p></div></details>
+          })}
+        </div>
+        <p className="mt-2 border-t border-slate-100 pt-5 text-xs leading-5 text-slate-400">{result.note}</p>
+      </div>
+    </section>
+  )
 }
