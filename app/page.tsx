@@ -158,7 +158,20 @@ export default function Page() {
         setExplanation(fallback)
         await saveScanHistory({ scanType: 'url_scan', target: data.normalizedUrl, riskCategory: data.risk, confidenceLevel: 'Medium', finalReport: data.note, findings: { indicators: data.indicators } })
       }
-    } catch (scanError) { setError(scanError instanceof Error ? scanError.message : 'Unable to scan this URL.') } finally { setLoading(false); setExplanationLoading(false) }
+    } catch (scanError) {
+    const message = scanError instanceof Error ? scanError.message : 'Unable to scan this URL.'
+    setError(message)
+    if (url.trim()) {
+      await saveScanHistory({
+        scanType: 'url_scan',
+        target: url.trim(),
+        riskCategory: 'Unknown',
+        confidenceLevel: 'Low',
+        finalReport: message,
+        findings: { status: 'Unknown', error: message },
+      })
+    }
+  } finally { setLoading(false); setExplanationLoading(false) }
   }
 
   return (
