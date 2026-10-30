@@ -34,7 +34,7 @@ export default function DashboardPage() {
   const maxDailyCount = useMemo(() => Math.max(1, ...Object.values(data?.dailyCounts ?? {})), [data])
 
   return (
-    <main className="min-h-screen bg-white text-slate-950">
+    <main className="min-h-screen bg-[#eef2f5] text-slate-950">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-6 py-7">
         <Link href="/" className="flex items-center gap-2.5"><img src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-TMC6J8OtTrw06fQx00D797ADPNMbbv.png" alt="FindFake AI logo" className="h-10 w-10 rounded-lg object-cover" /><span className="text-lg font-semibold tracking-tight">FindFake<span className="text-slate-400"> AI</span></span></Link>
         <nav className="flex items-center gap-2 text-sm font-medium"><Link href="/" className="rounded-full px-3 py-1.5 text-slate-500 hover:bg-slate-100">Scan</Link><Link href="/dashboard" className="rounded-full bg-slate-950 px-3 py-1.5 text-white">Dashboard</Link></nav>
