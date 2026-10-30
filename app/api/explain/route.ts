@@ -6,9 +6,11 @@ type ScanResult = { normalizedUrl: string; risk: string; indicators: Indicator[]
 const GEMMA_MODEL = 'gemma-4-26b-a4b-it'
 
 function buildPrompt(result: ScanResult) {
-  const findings = result.indicators.map((item) =>
-    `- ${item.label}: status=${item.status}; explanation=${item.explanation}; evidence=${item.evidence}`,
-  ).join('\n')
+  const findings = result.indicators.map((item) => {
+    const explanation = item.explanation.slice(0, 240)
+    const evidence = item.evidence.slice(0, 180)
+    return `- ${item.label}: status=${item.status}; explanation=${explanation}; evidence=${evidence}`
+  }).join('\n')
 
   return `You are a cautious website-safety educator. Explain this URL scan in plain language for a non-technical user.
 
@@ -46,23 +48,46 @@ export async function POST(request: Request) {
       return NextResponse.json({ available: false, error: 'Scan findings are required.' }, { status: 400 })
     }
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMMA_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: buildPrompt(result) }] }] }),
-      cache: 'no-store',
-      signal: AbortSignal.timeout(15000),
+    const payload = JSON.stringify({
+      contents: [{ parts: [{ text: buildPrompt(result) }] }],
+      generationConfig: { maxOutputTokens: 256 },
     })
+    let lastError = 'Gemma request failed.'
 
-    if (!response.ok) {
-      return NextResponse.json({ available: false, error: 'Gemma could not generate an explanation right now.' }, { status: 200 })
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMMA_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+          cache: 'no-store',
+          signal: AbortSignal.timeout(15000),
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          const parts = data?.candidates?.[0]?.content?.parts as Array<{ text?: string; thought?: boolean }> | undefined
+          const explanation = parts?.filter((part) => !part.thought && part.text).map((part) => part.text).join('').trim()
+            || parts?.map((part) => part.text || '').join('').trim()
+          if (!explanation) {
+            lastError = 'Gemma returned no explanation.'
+          } else {
+            return NextResponse.json({ available: true, explanation, model: GEMMA_MODEL })
+          }
+        } else {
+          const detail = (await response.text()).slice(0, 300)
+          lastError = `Gemini API ${response.status}: ${detail || response.statusText}`
+          if (response.status < 500 && response.status !== 429) break
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : 'Gemma request failed.'
+      }
     }
 
-    const data = await response.json()
-    const explanation = data?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || '').join('').trim()
-    if (!explanation) return NextResponse.json({ available: false, error: 'Gemma returned no explanation.' }, { status: 200 })
-    return NextResponse.json({ available: true, explanation, model: GEMMA_MODEL })
-  } catch {
+    console.error('[FindFake AI] Gemma explanation failed:', { model: GEMMA_MODEL, error: lastError })
+    return NextResponse.json({ available: false, error: 'Gemma is temporarily unavailable. The scan results are still available.' }, { status: 200 })
+  } catch (error) {
+    console.error('[FindFake AI] Explanation request failed:', error instanceof Error ? error.message : 'Unknown error')
     return NextResponse.json({ available: false, error: 'Gemma is temporarily unavailable. The scan results are still available.' }, { status: 200 })
   }
 }
