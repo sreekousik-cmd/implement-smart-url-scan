@@ -8,7 +8,7 @@ type Status = 'passed' | 'warning' | 'failed' | 'unavailable'
 type Indicator = { label: string; status: Status; explanation: string; evidence: string }
 type Result = { normalizedUrl: string; risk: string; indicators: Indicator[]; note: string }
 type Explanation = { available: boolean; explanation?: string; error?: string }
-type HistoryType = 'url_scan' | 'visual_comparison' | 'ocr'
+type HistoryType = 'url_scan' | 'website_reputation' | 'visual_comparison' | 'ocr'
 type HistoryRecord = { id: string; scanType: HistoryType; scanDate: string; target: string | null; riskCategory: string; confidenceLevel: string; finalReport: string; findings: Record<string, unknown> }
 type OCRReport = { suspiciousText: string[]; officialText: string[]; matchingText: string[]; changedText: { suspicious: string; official: string; reason: string }[]; missingText: { text: string; presentOn: 'suspicious' | 'official' }[]; highlights: string[]; note: string }
 
@@ -145,18 +145,30 @@ export default function Page() {
         const explanationResponse = await fetch('/api/explain', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ result: data }), signal: AbortSignal.timeout(20000) })
         const explanationData = await explanationResponse.json()
         setExplanation(explanationData)
-        await saveScanHistory({
-          scanType: 'url_scan',
-          target: data.normalizedUrl,
-          riskCategory: data.risk,
-          confidenceLevel: data.indicators.some((item: Indicator) => item.status === 'unavailable') ? 'Medium' : 'High',
-          finalReport: explanationData.available ? explanationData.explanation : data.note,
-          findings: { indicators: data.indicators },
-        })
+          const report = explanationData.available ? explanationData.explanation : data.note
+          const findings = { indicators: data.indicators }
+          await saveScanHistory({
+            scanType: 'url_scan',
+            target: data.normalizedUrl,
+            riskCategory: data.risk,
+            confidenceLevel: data.indicators.some((item: Indicator) => item.status === 'unavailable') ? 'Medium' : 'High',
+            finalReport: report,
+            findings,
+          })
+          await saveScanHistory({
+            scanType: 'website_reputation',
+            target: data.normalizedUrl,
+            riskCategory: data.risk,
+            confidenceLevel: data.indicators.some((item: Indicator) => item.status === 'unavailable') ? 'Medium' : 'High',
+            finalReport: report,
+            findings: { indicators: data.indicators.filter((item: Indicator) => ['Website reputation', 'Phishing detection', 'Trusted brand reputation'].includes(item.label)) },
+          })
       } catch {
         const fallback = { available: false, error: 'Gemma is temporarily unavailable. The scan results are still available.' }
         setExplanation(fallback)
-        await saveScanHistory({ scanType: 'url_scan', target: data.normalizedUrl, riskCategory: data.risk, confidenceLevel: 'Medium', finalReport: data.note, findings: { indicators: data.indicators } })
+        const findings = { indicators: data.indicators }
+        await saveScanHistory({ scanType: 'url_scan', target: data.normalizedUrl, riskCategory: data.risk, confidenceLevel: 'Medium', finalReport: data.note, findings })
+        await saveScanHistory({ scanType: 'website_reputation', target: data.normalizedUrl, riskCategory: data.risk, confidenceLevel: 'Medium', finalReport: data.note, findings: { indicators: data.indicators.filter((item: Indicator) => ['Website reputation', 'Phishing detection', 'Trusted brand reputation'].includes(item.label)) } })
       }
     } catch (scanError) {
     const message = scanError instanceof Error ? scanError.message : 'Unable to scan this URL.'
@@ -215,7 +227,7 @@ function ComparisonPanel({ files, report, loading, error, onFilesChange, onSubmi
 }
 
 function HistoryPanel({ records, filter, loading, error, openId, onFilterChange, onToggle, onDelete }: { records: HistoryRecord[]; filter: 'all' | HistoryType; loading: boolean; error: string; openId: string | null; onFilterChange: (value: 'all' | HistoryType) => void; onToggle: (id: string | null) => void; onDelete: (id: string) => void }) {
-  const labels: Record<'all' | HistoryType, string> = { all: 'All scans', url_scan: 'URL Scan', visual_comparison: 'Visual Comparison', ocr: 'OCR' }
+  const labels: Record<'all' | HistoryType, string> = { all: 'All scans', url_scan: 'URL Scan', website_reputation: 'Website Reputation', visual_comparison: 'Visual Comparison', ocr: 'OCR' }
   return <section className="mx-auto mt-10 max-w-2xl text-left" aria-labelledby="history-heading">
     <div className="flex items-center justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Scan History</p><h2 id="history-heading" className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Previous reports</h2></div><FileText className="text-slate-300" size={22} /></div>
     <div className="mt-4 flex flex-wrap gap-2">{(Object.keys(labels) as Array<'all' | HistoryType>).map((key) => <button key={key} type="button" onClick={() => onFilterChange(key)} className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${filter === key ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 text-slate-500 hover:border-slate-400'}`}>{labels[key]}</button>)}</div>

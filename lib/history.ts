@@ -1,4 +1,4 @@
-export type HistoryScanType = "url_scan" | "visual_comparison" | "ocr"
+export type HistoryScanType = "url_scan" | "website_reputation" | "visual_comparison" | "ocr"
 
 export type HistoryRecord = {
   id: string

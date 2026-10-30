@@ -6,7 +6,7 @@ import { db } from "@/lib/db"
 import { scanHistory } from "@/lib/db/schema"
 
 const COOKIE_NAME = "findfake_visitor"
-const allowedTypes = new Set(["url_scan", "visual_comparison", "ocr"])
+const allowedTypes = new Set(["url_scan", "website_reputation", "visual_comparison", "ocr"])
 
 async function getVisitorId() {
   const cookieStore = await cookies()
