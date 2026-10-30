@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ArrowRight, BarChart3, FileText, Gauge, History, ScanLine, ShieldAlert, ShieldCheck } from 'lucide-react'
+import { ArrowRight, BarChart3, FileText, Gauge, History, ScanLine, ShieldAlert } from 'lucide-react'
 
 type ScanType = 'url_scan' | 'visual_comparison' | 'ocr'
 type HistoryItem = { id: string; scanType: ScanType; scanDate: string; target: string | null; riskCategory: string; confidenceLevel: string; finalReport: string }
@@ -32,7 +32,7 @@ export default function DashboardPage() {
   return (
     <main className="min-h-screen bg-white text-slate-950">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-6 py-7">
-        <Link href="/" className="flex items-center gap-2.5"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-950 text-white"><ShieldCheck size={18} /></span><span className="text-lg font-semibold tracking-tight">FindFake<span className="text-slate-400"> AI</span></span></Link>
+        <Link href="/" className="flex items-center gap-2.5"><img src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-TMC6J8OtTrw06fQx00D797ADPNMbbv.png" alt="FindFake AI logo" className="h-10 w-10 rounded-lg object-cover" /><span className="text-lg font-semibold tracking-tight">FindFake<span className="text-slate-400"> AI</span></span></Link>
         <nav className="flex items-center gap-2 text-sm font-medium"><Link href="/" className="rounded-full px-3 py-1.5 text-slate-500 hover:bg-slate-100">Scan</Link><Link href="/dashboard" className="rounded-full bg-slate-950 px-3 py-1.5 text-white">Dashboard</Link></nav>
       </header>
 

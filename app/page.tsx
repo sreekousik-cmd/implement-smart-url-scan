@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { FormEvent, useEffect, useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, CircleHelp, FileText, Search, ShieldCheck, Sparkles, Trash2, Upload, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, CircleHelp, FileText, Search, Sparkles, Trash2, Upload, X } from 'lucide-react'
 
 type Status = 'passed' | 'warning' | 'failed' | 'unavailable'
 type Indicator = { label: string; status: Status; explanation: string; evidence: string }
@@ -131,7 +131,7 @@ export default function Page() {
   return (
     <main className="min-h-screen bg-white text-slate-950">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-6 py-7">
-        <div className="flex items-center gap-2.5"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-950 text-white"><ShieldCheck size={18} /></div><span className="text-lg font-semibold tracking-tight">FindFake<span className="text-slate-400"> AI</span></span></div>
+        <Link href="/" className="flex items-center gap-2.5"><img src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-TMC6J8OtTrw06fQx00D797ADPNMbbv.png" alt="FindFake AI logo" className="h-10 w-10 rounded-lg object-cover" /><span className="text-lg font-semibold tracking-tight">FindFake<span className="text-slate-400"> AI</span></span></Link>
         <nav className="flex items-center gap-2 text-xs font-medium sm:text-sm">
           <span className="hidden rounded-full border border-slate-200 px-3 py-1 text-slate-500 sm:inline-flex">Smart URL Scan</span>
           <Link href="/dashboard" className="rounded-full bg-slate-950 px-3 py-1.5 text-white transition hover:bg-slate-800">Dashboard</Link>
