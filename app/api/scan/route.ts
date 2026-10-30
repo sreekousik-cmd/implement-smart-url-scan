@@ -6,10 +6,14 @@ import { NextResponse } from 'next/server'
 const PRIVATE_HOST = /^(localhost|.*\.local|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[0-1])\.|0\.)/i
 const COMMON_BRANDS = ['google.com', 'paypal.com', 'microsoft.com', 'apple.com', 'amazon.com', 'facebook.com', 'instagram.com', 'netflix.com']
 const CHECK_TIMEOUT_MS = 7000
+const MULTI_LABEL_SUFFIXES = new Set(['co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au', 'co.jp', 'co.nz', 'co.za'])
 
 type Status = 'passed' | 'warning' | 'failed' | 'unavailable'
 type Indicator = { label: string; status: Status; explanation: string; evidence: string }
 type ParsedUrl = { url: URL; hostname: string; registrable: string }
+
+type RdapEvent = { eventAction?: string; eventDate?: string }
+type Certificate = { valid_from?: string; valid_to?: string; issuer?: { O?: string; CN?: string }; subject?: { CN?: string } }
 
 function levenshtein(a: string, b: string) {
   const row = Array.from({ length: b.length + 1 }, (_, i) => i)
@@ -32,6 +36,13 @@ function withTimeout<T>(promise: Promise<T>, message: string) {
   ])
 }
 
+function getRegistrableDomain(hostname: string) {
+  const labels = hostname.split('.').filter(Boolean)
+  if (labels.length <= 2) return labels.join('.')
+  const suffix = labels.slice(-2).join('.')
+  return MULTI_LABEL_SUFFIXES.has(suffix) ? labels.slice(-3).join('.') : suffix
+}
+
 function parseUrl(input: string): ParsedUrl {
   const value = input.trim().replace(/\s+/g, '')
   if (!value || value.length > 2048) throw new Error('Enter a URL under 2,048 characters.')
@@ -41,63 +52,93 @@ function parseUrl(input: string): ParsedUrl {
   if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) throw new Error('Only HTTP and HTTPS website URLs are supported.')
   const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
   if (PRIVATE_HOST.test(hostname) || /^[0-9a-f:]+$/i.test(hostname) || /^\d+(\.\d+){3}$/.test(hostname)) throw new Error('Private, local, and IP-address destinations are not allowed.')
-  const labels = hostname.split('.')
-  const registrable = labels.length >= 2 ? labels.slice(-2).join('.') : hostname
-  return { url, hostname, registrable }
+  return { url, hostname, registrable: getRegistrableDomain(hostname) }
 }
 
 function unavailable(label: string, explanation: string, evidence: string): Indicator {
   return { label, status: 'unavailable', explanation, evidence }
 }
 
-async function checkDomainAge(hostname: string, registrable: string): Promise<Indicator> {
+function rdapEndpoints(registrable: string) {
+  const tld = registrable.split('.').pop()
+  if (tld === 'com' || tld === 'net') return [`https://rdap.verisign.com/${tld}/v1/domain/${encodeURIComponent(registrable)}`]
+  if (tld === 'org') return [`https://rdap.publicinterestregistry.org/rdap/org/domain/${encodeURIComponent(registrable)}`]
+  return [`https://rdap.org/domain/${encodeURIComponent(registrable)}`]
+}
+
+async function checkDomainAge(registrable: string): Promise<Indicator> {
   try {
-    const response = await withTimeout(fetch(`https://rdap.org/domain/${encodeURIComponent(registrable)}`, { cache: 'no-store' }), 'RDAP timed out.')
-    if (!response.ok) return unavailable('Domain age', 'The registration service could not verify this domain.', `RDAP returned HTTP ${response.status}.`)
-    const data = await response.json() as { events?: Array<{ eventAction?: string; eventDate?: string }> }
-    const registration = data.events?.find((event) => event.eventAction?.toLowerCase() === 'registration')?.eventDate
+    let data: { events?: RdapEvent[] } | null = null
+    let lastStatus = 'no response'
+    for (const endpoint of rdapEndpoints(registrable)) {
+      const response = await withTimeout(fetch(endpoint, { cache: 'no-store' }), 'RDAP timed out.')
+      lastStatus = `HTTP ${response.status}`
+      if (response.ok) {
+        data = await response.json() as { events?: RdapEvent[] }
+        break
+      }
+    }
+    if (!data) return unavailable('Domain age', 'The registration service could not verify this domain.', `RDAP returned ${lastStatus} for ${registrable}.`)
+    const registration = data.events?.find((event) => ['registration', 'registered'].includes(event.eventAction?.toLowerCase() || ''))?.eventDate
     if (!registration) return unavailable('Domain age', 'No registration date was provided by RDAP.', `RDAP returned no registration event for ${registrable}.`)
-    const ageDays = Math.floor((Date.now() - new Date(registration).getTime()) / 86_400_000)
+    const registrationTime = new Date(registration).getTime()
+    const ageDays = Math.floor((Date.now() - registrationTime) / 86_400_000)
     if (!Number.isFinite(ageDays) || ageDays < 0) return unavailable('Domain age', 'The registration date could not be interpreted safely.', `RDAP registration date: ${registration}.`)
     const status: Status = ageDays < 7 ? 'failed' : ageDays < 30 ? 'warning' : 'passed'
-    return { label: 'Domain age', status, explanation: ageDays < 30 ? 'Recently registered domains deserve additional caution because phishing sites are often short-lived.' : 'The RDAP registration date is not unusually recent.', evidence: `Registered ${ageDays} day${ageDays === 1 ? '' : 's'} ago (${new Date(registration).toISOString().slice(0, 10)}).` }
+    return { label: 'Domain age', status, explanation: ageDays < 30 ? 'Recently registered domains deserve additional caution because phishing sites are often short-lived.' : 'The RDAP registration date is not unusually recent.', evidence: `Registered ${ageDays} day${ageDays === 1 ? '' : 's'} ago (${new Date(registrationTime).toISOString().slice(0, 10)}).` }
   } catch (error) {
+    console.error('[scan] RDAP check failed', { registrable, error: error instanceof Error ? error.message : 'unknown error' })
     return unavailable('Domain age', 'The registration service was unavailable.', error instanceof Error ? error.message : 'RDAP request failed.')
   }
 }
 
-async function resolvePublicAddress(hostname: string) {
-  const result = await withTimeout(lookup(hostname), 'DNS lookup timed out.')
-  const address = result.address
+function isPrivateAddress(address: string) {
   if (isIP(address) === 4) {
     const parts = address.split('.').map(Number)
-    if (parts[0] === 10 || parts[0] === 127 || parts[0] === 0 || parts[0] === 169 && parts[1] === 254 || parts[0] === 192 && parts[1] === 168 || parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) throw new Error('The hostname resolves to a private address.')
-  } else if (address === '::1' || address.startsWith('fc') || address.startsWith('fd') || address.startsWith('fe80:')) {
-    throw new Error('The hostname resolves to a private address.')
+    return parts[0] === 10 || parts[0] === 127 || parts[0] === 0 || (parts[0] === 169 && parts[1] === 254) || (parts[0] === 192 && parts[1] === 168) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
   }
-  return address
+  const normalized = address.toLowerCase()
+  return normalized === '::1' || normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe80:') || normalized.startsWith('::ffff:10.') || normalized.startsWith('::ffff:192.168.') || normalized.startsWith('::ffff:127.')
+}
+
+async function resolvePublicAddresses(hostname: string) {
+  const results = await withTimeout(lookup(hostname, { all: true }), 'DNS lookup timed out.')
+  const addresses = results.map((result) => result.address)
+  if (!addresses.length || addresses.some(isPrivateAddress)) throw new Error('The hostname resolves to a private or restricted address.')
+  return addresses
 }
 
 async function checkSsl(hostname: string, protocol: string): Promise<Indicator> {
   if (protocol !== 'https:') return unavailable('SSL certificate', 'The submitted URL does not use HTTPS, so a certificate could not be verified.', 'Use an HTTPS URL for certificate verification.')
   try {
-    const address = await resolvePublicAddress(hostname)
-    const certificate = await withTimeout(new Promise<{ validTo?: string; subject?: { CN?: string } }>((resolve, reject) => {
+    const [address] = await resolvePublicAddresses(hostname)
+    const certificate = await withTimeout(new Promise<Certificate>((resolve, reject) => {
       const socket = tlsConnect({ host: address, servername: hostname, port: 443, rejectUnauthorized: true }, () => {
-        const peer = socket.getPeerCertificate(true)
+        const peer = socket.getPeerCertificate(true) as Certificate
         socket.end()
         resolve(peer)
       })
       socket.once('error', reject)
-      socket.setTimeout(CHECK_TIMEOUT_MS, () => { socket.destroy(new Error('TLS handshake timed out.')) })
+      socket.setTimeout(CHECK_TIMEOUT_MS, () => socket.destroy(new Error('TLS handshake timed out.')))
     }), 'TLS check timed out.')
-    if (!certificate.validTo) return unavailable('SSL certificate', 'The certificate did not expose an expiry date.', 'Certificate details were incomplete.')
-    const expiry = new Date(certificate.validTo)
-    const daysRemaining = Math.floor((expiry.getTime() - Date.now()) / 86_400_000)
-    const status: Status = daysRemaining < 0 ? 'failed' : daysRemaining < 14 ? 'warning' : 'passed'
-    return { label: 'SSL certificate', status, explanation: status === 'passed' ? 'The HTTPS certificate was verified and is not close to expiry.' : 'The HTTPS certificate is expired or close to expiry; do not treat HTTPS alone as proof of legitimacy.', evidence: `Certificate for ${certificate.subject?.CN || hostname} expires ${expiry.toISOString().slice(0, 10)} (${Math.max(daysRemaining, 0)} days remaining).` }
+    if (!certificate.valid_from || !certificate.valid_to) return unavailable('SSL certificate', 'The certificate did not expose complete validity dates.', 'Certificate details were incomplete.')
+    const validFrom = new Date(certificate.valid_from)
+    const expiry = new Date(certificate.valid_to)
+    if (!Number.isFinite(validFrom.getTime()) || !Number.isFinite(expiry.getTime())) return unavailable('SSL certificate', 'The certificate dates could not be interpreted safely.', 'Certificate dates were invalid.')
+    const now = Date.now()
+    const daysRemaining = Math.floor((expiry.getTime() - now) / 86_400_000)
+    const notYetValid = validFrom.getTime() > now
+    if (daysRemaining < 0) return { label: 'SSL certificate', status: 'failed', explanation: 'The HTTPS certificate is expired. Do not continue to this website.', evidence: `Certificate for ${certificate.subject?.CN || hostname} expired on ${expiry.toISOString().slice(0, 10)}; issuer: ${certificate.issuer?.O || certificate.issuer?.CN || 'not provided'}.` }
+    if (notYetValid) return { label: 'SSL certificate', status: 'failed', explanation: 'The HTTPS certificate is not valid yet.', evidence: `Certificate validity starts ${validFrom.toISOString().slice(0, 10)}; issuer: ${certificate.issuer?.O || certificate.issuer?.CN || 'not provided'}.` }
+    const status: Status = daysRemaining < 14 ? 'warning' : 'passed'
+    return { label: 'SSL certificate', status, explanation: status === 'passed' ? 'The HTTPS certificate was verified and is not close to expiry.' : 'The HTTPS certificate is close to expiry; do not treat HTTPS alone as proof of legitimacy.', evidence: `Certificate for ${certificate.subject?.CN || hostname} is valid through ${expiry.toISOString().slice(0, 10)} (${daysRemaining} days remaining); issuer: ${certificate.issuer?.O || certificate.issuer?.CN || 'not provided'}.` }
   } catch (error) {
-    return unavailable('SSL certificate', 'The HTTPS certificate could not be verified from this environment.', error instanceof Error ? error.message : 'TLS verification failed.')
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+    const message = error instanceof Error ? error.message : 'TLS verification failed.'
+    console.error('[scan] SSL check failed', { hostname, code, error: message })
+    if (code === 'CERT_HAS_EXPIRED') return { label: 'SSL certificate', status: 'failed', explanation: 'The HTTPS certificate is expired. Do not continue to this website.', evidence: 'TLS reported CERT_HAS_EXPIRED.' }
+    if (code === 'ERR_TLS_CERT_ALTNAME_INVALID') return { label: 'SSL certificate', status: 'failed', explanation: 'The certificate does not match this hostname.', evidence: 'TLS reported a hostname mismatch.' }
+    return unavailable('SSL certificate', 'The HTTPS certificate could not be verified from this environment.', message)
   }
 }
 
@@ -111,6 +152,7 @@ async function checkUrlhaus(normalizedUrl: string): Promise<Indicator> {
     if (data.query_status === 'ok') return { label: 'Phishing detection', status: 'failed', explanation: 'The URL appears in the checked malicious-URL database. Avoid entering credentials or payment details.', evidence: `URLhaus record: ${data.threat || 'threat listed'}; status ${data.url_status || 'unknown'}.` }
     return unavailable('Phishing detection', 'The malicious-URL database returned an inconclusive response.', `URLhaus status: ${data.query_status || 'unknown'}.`)
   } catch (error) {
+    console.error('[scan] phishing database check failed', { error: error instanceof Error ? error.message : 'unknown error' })
     return unavailable('Phishing detection', 'The malicious-URL database was unavailable.', error instanceof Error ? error.message : 'URLhaus request failed.')
   }
 }
@@ -125,6 +167,7 @@ async function checkReputation(normalizedUrl: string): Promise<Indicator> {
     if (data.matches?.length) return { label: 'Website reputation', status: 'failed', explanation: 'The reputation provider reported a threat match. Do not treat the website as trustworthy.', evidence: `Reported threat types: ${data.matches.map((match) => match.threatType || 'unknown').join(', ')}.` }
     return { label: 'Website reputation', status: 'passed', explanation: 'The configured reputation provider found no threat match. This is not a guarantee of safety.', evidence: 'No Safe Browsing threat match was returned.' }
   } catch (error) {
+    console.error('[scan] reputation check failed', { error: error instanceof Error ? error.message : 'unknown error' })
     return unavailable('Website reputation', 'The reputation provider was unavailable.', error instanceof Error ? error.message : 'Reputation request failed.')
   }
 }
@@ -137,7 +180,7 @@ function analyzeUrl(parsed: ParsedUrl): Indicator {
     const hostBase = registrable.split('.')[0]
     return hostBase !== base && levenshtein(hostBase, base) <= 2
   })
-  const misleadingSubdomain = labels.length > 2 && COMMON_BRANDS.some((brand) => labels.slice(0, -2).join('.').toLowerCase().includes(brand.split('.')[0]))
+  const misleadingSubdomain = labels.length > registrable.split('.').length && COMMON_BRANDS.some((brand) => labels.slice(0, -registrable.split('.').length).join('.').toLowerCase().includes(brand.split('.')[0]))
   const suspiciousWords = /(login|verify|account|secure|update|password|wallet|claim|bonus|free|billing)/i.test(`${hostname}${url.pathname}${url.search}`)
   const suspiciousPath = url.pathname.length > 180 || url.search.length > 500 || url.href.length > 500
   const hasEncodedTricks = /%[0-9a-f]{2}/i.test(url.pathname + url.search) || /[\\@]/.test(url.pathname + url.search)
@@ -150,7 +193,7 @@ function analyzeUrl(parsed: ParsedUrl): Indicator {
 async function scanUrl(input: string) {
   const parsed = parseUrl(input)
   const indicators = await Promise.all([
-    checkDomainAge(parsed.hostname, parsed.registrable),
+    checkDomainAge(parsed.registrable),
     checkSsl(parsed.hostname, parsed.url.protocol),
     checkUrlhaus(parsed.url.toString()),
     analyzeUrl(parsed),
