@@ -145,8 +145,10 @@ async function checkSsl(hostname: string, protocol: string): Promise<Indicator> 
 async function checkUrlhaus(normalizedUrl: string): Promise<Indicator> {
   try {
     const body = new URLSearchParams({ url: normalizedUrl })
-    const response = await withTimeout(fetch('https://urlhaus-api.abuse.ch/v1/url/', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body, cache: 'no-store' }), 'URLhaus timed out.')
-    if (!response.ok) return unavailable('Phishing detection', 'The malicious-URL database could not verify this URL.', `URLhaus returned HTTP ${response.status}.`)
+const urlhausHeaders: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded' }
+  if (process.env.URLHAUS_AUTH_KEY) urlhausHeaders['Auth-Key'] = process.env.URLHAUS_AUTH_KEY
+  const response = await withTimeout(fetch('https://urlhaus-api.abuse.ch/v1/url/', { method: 'POST', headers: urlhausHeaders, body, cache: 'no-store' }), 'URLhaus timed out.')
+  if (!response.ok) return unavailable('Phishing detection', 'The malicious-URL database could not verify this URL.', `Provider URLhaus returned HTTP ${response.status}${process.env.URLHAUS_AUTH_KEY ? '.' : ' (no URLHAUS_AUTH_KEY is configured).'}`)
     const data = await response.json() as { query_status?: string; threat?: string; url_status?: string }
     if (data.query_status === 'no_results') return { label: 'Phishing detection', status: 'passed', explanation: 'The URL was not found in the checked malicious-URL database. This is not proof that it is safe.', evidence: 'URLhaus returned no matching record.' }
     if (data.query_status === 'ok') return { label: 'Phishing detection', status: 'failed', explanation: 'The URL appears in the checked malicious-URL database. Avoid entering credentials or payment details.', evidence: `URLhaus record: ${data.threat || 'threat listed'}; status ${data.url_status || 'unknown'}.` }
@@ -200,9 +202,10 @@ async function scanUrl(input: string) {
     checkReputation(parsed.url.toString()),
   ])
   const failed = indicators.filter((item) => item.status === 'failed').length
-  const warnings = indicators.filter((item) => item.status === 'warning').length
+  const meaningfulWarnings = indicators.filter((item) => item.status === 'warning' && item.label !== 'SSL certificate').length
+  const hasSslWarning = indicators.some((item) => item.label === 'SSL certificate' && item.status === 'warning')
   const unavailableCount = indicators.filter((item) => item.status === 'unavailable').length
-  const risk = failed > 0 ? 'High concern' : warnings > 0 ? 'Medium concern' : unavailableCount > 0 ? 'Inconclusive' : 'Low concern'
+  const risk = failed > 0 ? 'High concern' : meaningfulWarnings > 0 ? 'Medium concern' : hasSslWarning || unavailableCount > 0 ? 'Inconclusive' : 'Low concern'
   return { normalizedUrl: parsed.url.toString(), risk, indicators, note: 'These checks combine available registration, certificate, database, URL-pattern, and reputation evidence. A passed or unavailable check does not prove that a website is safe.' }
 }
 
