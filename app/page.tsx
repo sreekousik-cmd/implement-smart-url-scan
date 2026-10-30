@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { FormEvent, useEffect, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, CircleHelp, FileText, Search, ShieldCheck, Sparkles, Trash2, Upload, X } from 'lucide-react'
 
@@ -131,7 +132,10 @@ export default function Page() {
     <main className="min-h-screen bg-white text-slate-950">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-6 py-7">
         <div className="flex items-center gap-2.5"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-950 text-white"><ShieldCheck size={18} /></div><span className="text-lg font-semibold tracking-tight">FindFake<span className="text-slate-400"> AI</span></span></div>
-        <span className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-500">Smart URL Scan</span>
+        <nav className="flex items-center gap-2 text-xs font-medium sm:text-sm">
+          <span className="hidden rounded-full border border-slate-200 px-3 py-1 text-slate-500 sm:inline-flex">Smart URL Scan</span>
+          <Link href="/dashboard" className="rounded-full bg-slate-950 px-3 py-1.5 text-white transition hover:bg-slate-800">Dashboard</Link>
+        </nav>
       </header>
       <section className="mx-auto max-w-3xl px-6 pb-16 pt-16 text-center sm:pt-24">
         <p className="mb-4 text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">Check before you click</p>
