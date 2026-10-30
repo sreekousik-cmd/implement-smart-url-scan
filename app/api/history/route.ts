@@ -30,34 +30,46 @@ function withVisitorCookie(response: NextResponse, visitorId: string, shouldSet:
 export async function GET(request: Request) {
   const { id: visitorId, shouldSet } = await getVisitorId()
   const type = new URL(request.url).searchParams.get("type")
-  const rows = await db
-    .select()
-    .from(scanHistory)
-    .where(type && allowedTypes.has(type) ? and(eq(scanHistory.visitorId, visitorId), eq(scanHistory.scanType, type)) : eq(scanHistory.visitorId, visitorId))
-    .orderBy(desc(scanHistory.scanDate))
-    .limit(100)
 
-  return withVisitorCookie(NextResponse.json({ records: rows }), visitorId, shouldSet)
+  try {
+    const rows = await db
+      .select()
+      .from(scanHistory)
+      .where(type && allowedTypes.has(type) ? and(eq(scanHistory.visitorId, visitorId), eq(scanHistory.scanType, type)) : eq(scanHistory.visitorId, visitorId))
+      .orderBy(desc(scanHistory.scanDate))
+      .limit(100)
+
+    return withVisitorCookie(NextResponse.json({ records: rows }), visitorId, shouldSet)
+  } catch (error) {
+    console.error("[v0] History load failed", { message: error instanceof Error ? error.message : "Unknown database error" })
+    return withVisitorCookie(NextResponse.json({ error: "Scan history is temporarily unavailable." }, { status: 503 }), visitorId, shouldSet)
+  }
 }
 
 export async function POST(request: Request) {
   const { id: visitorId, shouldSet } = await getVisitorId()
-  const body = await request.json()
-  if (!allowedTypes.has(body.scanType) || typeof body.finalReport !== "string" || typeof body.riskCategory !== "string" || typeof body.confidenceLevel !== "string") {
-    return NextResponse.json({ error: "Invalid history record" }, { status: 400 })
+
+  try {
+    const body = await request.json()
+    if (!allowedTypes.has(body.scanType) || typeof body.finalReport !== "string" || typeof body.riskCategory !== "string" || typeof body.confidenceLevel !== "string") {
+      return NextResponse.json({ error: "Invalid history record" }, { status: 400 })
+    }
+
+    const [record] = await db.insert(scanHistory).values({
+      visitorId,
+      scanType: body.scanType,
+      target: typeof body.target === "string" ? body.target.slice(0, 2048) : null,
+      riskCategory: body.riskCategory.slice(0, 80),
+      confidenceLevel: body.confidenceLevel.slice(0, 80),
+      finalReport: body.finalReport.slice(0, 20000),
+      findings: body.findings && typeof body.findings === "object" ? body.findings : {},
+    }).returning()
+
+    return withVisitorCookie(NextResponse.json({ record }, { status: 201 }), visitorId, shouldSet)
+  } catch (error) {
+    console.error("[v0] History save failed", { message: error instanceof Error ? error.message : "Unknown database error" })
+    return withVisitorCookie(NextResponse.json({ error: "This report could not be saved to scan history." }, { status: 503 }), visitorId, shouldSet)
   }
-
-  const [record] = await db.insert(scanHistory).values({
-    visitorId,
-    scanType: body.scanType,
-    target: typeof body.target === "string" ? body.target.slice(0, 2048) : null,
-    riskCategory: body.riskCategory.slice(0, 80),
-    confidenceLevel: body.confidenceLevel.slice(0, 80),
-    finalReport: body.finalReport.slice(0, 20000),
-    findings: body.findings && typeof body.findings === "object" ? body.findings : {},
-  }).returning()
-
-  return withVisitorCookie(NextResponse.json({ record }, { status: 201 }), visitorId, shouldSet)
 }
 
 export async function DELETE(request: Request) {

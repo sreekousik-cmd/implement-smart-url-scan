@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
 const MODEL = 'gemma-4-26b-a4b-it'
-const MAX_BYTES = 8 * 1024 * 1024
+const MAX_BYTES = 5 * 1024 * 1024
 const ALLOWED_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
 
 type OCRReport = {
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
   const body = { contents: [{ parts: [{ text: prompt }, { inlineData: suspiciousImage }, { inlineData: officialImage }] }], generationConfig: { temperature: 0, maxOutputTokens: 400, responseMimeType: 'application/json' } }
 
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${encodeURIComponent(key)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) })
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${encodeURIComponent(key)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) })
     const payload = await response.json().catch(() => null)
     if (!response.ok) {
       console.error('[v0] OCR Gemini error', { status: response.status, message: payload?.error?.message || 'Unknown upstream error' })

@@ -56,9 +56,36 @@ export default function Page() {
 
   async function saveScanHistory(record: { scanType: HistoryType; target?: string; riskCategory: string; confidenceLevel: string; finalReport: string; findings: Record<string, unknown> }) {
     try {
-      await fetch('/api/history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record) })
+      const response = await fetch('/api/history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record) })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(data?.error || 'History save failed')
       await loadHistory()
-    } catch { setHistoryError('The scan finished, but it could not be saved to history.') }
+      return true
+    } catch (error) {
+      console.error('[v0] History save failed', error)
+      setHistoryError(error instanceof Error ? error.message : 'The scan finished, but it could not be saved to history.')
+      return false
+    }
+  }
+
+  async function compressScreenshot(file: File) {
+    if (file.size <= 2 * 1024 * 1024) return file
+    const sourceUrl = URL.createObjectURL(file)
+    try {
+      const image = new Image()
+      image.crossOrigin = 'anonymous'
+      image.src = sourceUrl
+      await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error('Unable to read screenshot')) })
+      const scale = Math.min(1, 1600 / Math.max(image.naturalWidth, image.naturalHeight))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+      canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height)
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.78))
+      return blob ? new File([blob], `${file.name.replace(/\.[^.]+$/, '')}.jpg`, { type: 'image/jpeg' }) : file
+    } finally {
+      URL.revokeObjectURL(sourceUrl)
+    }
   }
 
   async function handleDeleteHistory(id: string) {
@@ -77,21 +104,27 @@ export default function Page() {
     setComparisonError('')
     setComparison(null)
     try {
+      const [suspicious, official] = await Promise.all([
+        compressScreenshot(comparisonFiles.suspicious),
+        compressScreenshot(comparisonFiles.official),
+      ])
       const form = new FormData()
-      form.set('suspicious', comparisonFiles.suspicious)
-      form.set('official', comparisonFiles.official)
+      form.set('suspicious', suspicious)
+      form.set('official', official)
       const response = await fetch('/api/compare', { method: 'POST', body: form })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error)
       setComparison(data.report)
-      await saveScanHistory({
-        scanType: 'ocr',
+      const riskCategory = data.report.changedText.length || data.report.missingText.length ? 'Review differences' : 'No text differences found'
+      const comparisonRecord = {
         target: 'Screenshot comparison',
-        riskCategory: data.report.changedText.length || data.report.missingText.length ? 'Review differences' : 'No text differences found',
+        riskCategory,
         confidenceLevel: 'Medium',
         finalReport: data.report.note,
         findings: data.report,
-      })
+      }
+      await saveScanHistory({ ...comparisonRecord, scanType: 'visual_comparison' })
+      await saveScanHistory({ ...comparisonRecord, scanType: 'ocr' })
     } catch (comparisonError) {
       setComparisonError(comparisonError instanceof Error ? comparisonError.message : 'Unable to compare these screenshots.')
     } finally {
