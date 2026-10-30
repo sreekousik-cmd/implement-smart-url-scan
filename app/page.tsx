@@ -1,12 +1,15 @@
 'use client'
 
-import { FormEvent, useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, CircleHelp, Search, ShieldCheck, Sparkles, X } from 'lucide-react'
+import { FormEvent, useEffect, useState } from 'react'
+import { AlertTriangle, Check, ChevronDown, CircleHelp, FileText, Search, ShieldCheck, Sparkles, Trash2, Upload, X } from 'lucide-react'
 
 type Status = 'passed' | 'warning' | 'failed' | 'unavailable'
 type Indicator = { label: string; status: Status; explanation: string; evidence: string }
 type Result = { normalizedUrl: string; risk: string; indicators: Indicator[]; note: string }
 type Explanation = { available: boolean; explanation?: string; error?: string }
+type HistoryType = 'url_scan' | 'visual_comparison' | 'ocr'
+type HistoryRecord = { id: string; scanType: HistoryType; scanDate: string; target: string | null; riskCategory: string; confidenceLevel: string; finalReport: string; findings: Record<string, unknown> }
+type OCRReport = { suspiciousText: string[]; officialText: string[]; matchingText: string[]; changedText: { suspicious: string; official: string; reason: string }[]; missingText: { text: string; presentOn: 'suspicious' | 'official' }[]; highlights: string[]; note: string }
 
 const statusMeta = {
   passed: { label: 'Passed', icon: Check, className: 'text-emerald-700 bg-emerald-50' },
@@ -22,6 +25,78 @@ export default function Page() {
   const [loading, setLoading] = useState(false)
   const [explanation, setExplanation] = useState<Explanation | null>(null)
   const [explanationLoading, setExplanationLoading] = useState(false)
+  const [history, setHistory] = useState<HistoryRecord[]>([])
+  const [historyFilter, setHistoryFilter] = useState<'all' | HistoryType>('all')
+  const [historyLoading, setHistoryLoading] = useState(true)
+  const [historyError, setHistoryError] = useState('')
+  const [openHistoryId, setOpenHistoryId] = useState<string | null>(null)
+  const [comparisonFiles, setComparisonFiles] = useState<{ suspicious: File | null; official: File | null }>({ suspicious: null, official: null })
+  const [comparison, setComparison] = useState<OCRReport | null>(null)
+  const [comparisonLoading, setComparisonLoading] = useState(false)
+  const [comparisonError, setComparisonError] = useState('')
+
+  async function loadHistory(filter = historyFilter) {
+    setHistoryLoading(true)
+    try {
+      const query = filter === 'all' ? '' : `?type=${filter}`
+      const response = await fetch(`/api/history${query}`)
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error)
+      setHistory(data.records)
+      setHistoryError('')
+    } catch {
+      setHistoryError('Scan history is temporarily unavailable.')
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  useEffect(() => { void loadHistory() }, [historyFilter])
+
+  async function saveScanHistory(record: { scanType: HistoryType; target?: string; riskCategory: string; confidenceLevel: string; finalReport: string; findings: Record<string, unknown> }) {
+    try {
+      await fetch('/api/history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record) })
+      await loadHistory()
+    } catch { setHistoryError('The scan finished, but it could not be saved to history.') }
+  }
+
+  async function handleDeleteHistory(id: string) {
+    try {
+      const response = await fetch(`/api/history?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+      if (!response.ok) throw new Error()
+      setHistory((records) => records.filter((record) => record.id !== id))
+      if (openHistoryId === id) setOpenHistoryId(null)
+    } catch { setHistoryError('Unable to delete that history record.') }
+  }
+
+  async function handleComparison(event: FormEvent) {
+    event.preventDefault()
+    if (!comparisonFiles.suspicious || !comparisonFiles.official) return
+    setComparisonLoading(true)
+    setComparisonError('')
+    setComparison(null)
+    try {
+      const form = new FormData()
+      form.set('suspicious', comparisonFiles.suspicious)
+      form.set('official', comparisonFiles.official)
+      const response = await fetch('/api/compare', { method: 'POST', body: form })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error)
+      setComparison(data.report)
+      await saveScanHistory({
+        scanType: 'ocr',
+        target: 'Screenshot comparison',
+        riskCategory: data.report.changedText.length || data.report.missingText.length ? 'Review differences' : 'No text differences found',
+        confidenceLevel: 'Medium',
+        finalReport: data.report.note,
+        findings: data.report,
+      })
+    } catch (comparisonError) {
+      setComparisonError(comparisonError instanceof Error ? comparisonError.message : 'Unable to compare these screenshots.')
+    } finally {
+      setComparisonLoading(false)
+    }
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
@@ -34,9 +109,20 @@ export default function Page() {
       setExplanationLoading(true)
       try {
         const explanationResponse = await fetch('/api/explain', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ result: data }), signal: AbortSignal.timeout(20000) })
-        setExplanation(await explanationResponse.json())
+        const explanationData = await explanationResponse.json()
+        setExplanation(explanationData)
+        await saveScanHistory({
+          scanType: 'url_scan',
+          target: data.normalizedUrl,
+          riskCategory: data.risk,
+          confidenceLevel: data.indicators.some((item: Indicator) => item.status === 'unavailable') ? 'Medium' : 'High',
+          finalReport: explanationData.available ? explanationData.explanation : data.note,
+          findings: { indicators: data.indicators },
+        })
       } catch {
-        setExplanation({ available: false, error: 'Gemma is temporarily unavailable. The scan results are still available.' })
+        const fallback = { available: false, error: 'Gemma is temporarily unavailable. The scan results are still available.' }
+        setExplanation(fallback)
+        await saveScanHistory({ scanType: 'url_scan', target: data.normalizedUrl, riskCategory: data.risk, confidenceLevel: 'Medium', finalReport: data.note, findings: { indicators: data.indicators } })
       }
     } catch (scanError) { setError(scanError instanceof Error ? scanError.message : 'Unable to scan this URL.') } finally { setLoading(false); setExplanationLoading(false) }
   }
@@ -58,9 +144,34 @@ export default function Page() {
         </form>
         {error && <p role="alert" className="mt-4 text-sm font-medium text-red-600">{error}</p>}
         {result && <Results result={result} explanation={explanation} loading={explanationLoading} />}
+        <ComparisonPanel files={comparisonFiles} report={comparison} loading={comparisonLoading} error={comparisonError} onFilesChange={setComparisonFiles} onSubmit={handleComparison} />
+        <HistoryPanel records={history} filter={historyFilter} loading={historyLoading} error={historyError} openId={openHistoryId} onFilterChange={setHistoryFilter} onToggle={setOpenHistoryId} onDelete={handleDeleteHistory} />
       </section>
     </main>
   )
+}
+
+function ComparisonPanel({ files, report, loading, error, onFilesChange, onSubmit }: { files: { suspicious: File | null; official: File | null }; report: OCRReport | null; loading: boolean; error: string; onFilesChange: (files: { suspicious: File | null; official: File | null }) => void; onSubmit: (event: FormEvent) => void }) {
+  return <section className="mx-auto mt-10 max-w-2xl text-left" aria-labelledby="comparison-heading">
+    <div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-700"><Upload size={17} /></span><div><p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Visual comparison</p><h2 id="comparison-heading" className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Compare visible text</h2></div></div>
+    <p className="mt-2 text-sm leading-6 text-slate-500">Upload a suspicious screenshot and an official reference. OCR extracts visible text and highlights differences without declaring either site fraudulent.</p>
+    <form onSubmit={onSubmit} className="mt-5 grid gap-3 sm:grid-cols-2">
+      {(['suspicious', 'official'] as const).map((key) => <label key={key} className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm font-medium text-slate-700"><span className="block">{key === 'suspicious' ? 'Suspicious screenshot' : 'Official screenshot'}</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onFilesChange({ ...files, [key]: event.target.files?.[0] || null })} className="mt-3 block w-full text-xs text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-950 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-white" /></label>)}
+      <button type="submit" disabled={loading || !files.suspicious || !files.official} className="h-12 rounded-xl bg-slate-950 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 sm:col-span-2">{loading ? 'Reading screenshots…' : 'Compare screenshots'}</button>
+    </form>
+    {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
+    {report && <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 text-sm leading-6 text-slate-600"><p className="font-semibold text-slate-800">OCR comparison report</p>{report.highlights.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-5">{report.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul>}<p className="mt-4 border-t border-slate-100 pt-4">{report.note}</p>{report.changedText.length > 0 && <div className="mt-4"><p className="font-semibold text-slate-800">Changed text</p>{report.changedText.map((change, index) => <p key={`${change.suspicious}-${index}`} className="mt-2 text-sm"><span className="font-medium">{change.suspicious || '—'}</span> → <span className="font-medium">{change.official || '—'}</span><span className="block text-xs text-slate-400">{change.reason}</span></p>)}</div>}</div>}
+  </section>
+}
+
+function HistoryPanel({ records, filter, loading, error, openId, onFilterChange, onToggle, onDelete }: { records: HistoryRecord[]; filter: 'all' | HistoryType; loading: boolean; error: string; openId: string | null; onFilterChange: (value: 'all' | HistoryType) => void; onToggle: (id: string | null) => void; onDelete: (id: string) => void }) {
+  const labels: Record<'all' | HistoryType, string> = { all: 'All scans', url_scan: 'URL Scan', visual_comparison: 'Visual Comparison', ocr: 'OCR' }
+  return <section className="mx-auto mt-10 max-w-2xl text-left" aria-labelledby="history-heading">
+    <div className="flex items-center justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Scan History</p><h2 id="history-heading" className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Previous reports</h2></div><FileText className="text-slate-300" size={22} /></div>
+    <div className="mt-4 flex flex-wrap gap-2">{(Object.keys(labels) as Array<'all' | HistoryType>).map((key) => <button key={key} type="button" onClick={() => onFilterChange(key)} className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${filter === key ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 text-slate-500 hover:border-slate-400'}`}>{labels[key]}</button>)}</div>
+    {error && <p role="alert" className="mt-4 text-sm text-amber-700">{error}</p>}
+    {loading ? <p className="mt-5 text-sm text-slate-500">Loading saved reports…</p> : records.length === 0 ? <p className="mt-5 rounded-xl border border-dashed border-slate-200 p-5 text-sm text-slate-500">No saved reports in this filter.</p> : <div className="mt-5 divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white">{records.map((record) => <div key={record.id} className="p-4"><div className="flex items-start gap-3"><button type="button" onClick={() => onToggle(openId === record.id ? null : record.id)} className="min-w-0 flex-1 text-left"><p className="text-sm font-semibold text-slate-800">{labels[record.scanType]}</p><p className="mt-1 truncate text-xs text-slate-500">{record.target || 'Saved report'}</p><p className="mt-1 text-xs text-slate-400">{new Date(record.scanDate).toLocaleString()} · {record.riskCategory} · {record.confidenceLevel} confidence</p></button><button type="button" aria-label={`Delete ${labels[record.scanType]} report`} onClick={() => onDelete(record.id)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={16} /></button></div>{openId === record.id && <div className="mt-4 border-t border-slate-100 pt-4 text-sm leading-6 text-slate-600"><p className="whitespace-pre-wrap">{record.finalReport}</p></div>}</div>)}</div>}
+  </section>
 }
 
 function Results({ result, explanation, loading }: { result: Result; explanation: Explanation | null; loading: boolean }) {
