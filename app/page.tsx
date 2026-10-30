@@ -193,7 +193,7 @@ export default function Page() {
   }
 
   return (
-    <main className="min-h-screen bg-[linear-gradient(135deg,#f8fafc_0%,#eef2f5_48%,#dfe7ed_100%)] text-slate-950">
+    <main className="min-h-screen bg-[#fafafa] text-slate-950">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-6 py-7">
         <Link href="/" className="flex items-center gap-2.5"><img src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-TMC6J8OtTrw06fQx00D797ADPNMbbv.png" alt="FindFake AI logo" className="h-12 w-12 rounded-lg object-cover" /><span className="text-2xl font-semibold tracking-tight sm:text-3xl">FindFake<span className="text-slate-400"> AI</span></span></Link>
         <nav className="flex items-center gap-2 text-xs font-medium sm:text-sm">
@@ -220,8 +220,8 @@ export default function Page() {
 }
 
 function ComparisonPanel({ file, report, loading, error, onFileChange, onSubmit }: { file: File | null; report: OCRReport | null; loading: boolean; error: string; onFileChange: (file: File | null) => void; onSubmit: (event: FormEvent) => void }) {
-  return <section className="mx-auto mt-10 max-w-2xl rounded-3xl bg-[linear-gradient(135deg,rgba(215,255,47,0.22),rgba(36,87,255,0.16))] p-1 text-left" aria-labelledby="comparison-heading">
-    <div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[linear-gradient(135deg,#d7ff2f,#2457ff)] text-slate-950 shadow-sm"><Upload size={17} /></span><div><p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Visual website analysis</p><h2 id="comparison-heading" className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Verify a website screenshot</h2></div></div>
+  return <section className="mx-auto mt-10 max-w-2xl rounded-3xl bg-white p-1 text-left" aria-labelledby="comparison-heading">
+    <div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 text-white shadow-sm"><Upload size={17} /></span><div><p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Visual website analysis</p><h2 id="comparison-heading" className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Verify a website screenshot</h2></div></div>
     <p className="mt-2 text-sm leading-6 text-slate-500">Upload one screenshot. OCR extracts visible details and checks for cautious impersonation indicators without assuming an unfamiliar site is fake.</p>
     <form onSubmit={onSubmit} className="mt-5 grid gap-3">
       <label className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm font-medium text-slate-700"><span className="block">Upload Website Screenshot</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onFileChange(event.target.files?.[0] || null)} className="mt-3 block w-full text-xs text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-950 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-white" /></label>
@@ -234,7 +234,7 @@ function ComparisonPanel({ file, report, loading, error, onFileChange, onSubmit 
 
 function HistoryPanel({ records, filter, from, to, loading, error, openId, onFilterChange, onFromChange, onToChange, onToggle, onDelete }: { records: HistoryRecord[]; filter: 'all' | HistoryType; from: string; to: string; loading: boolean; error: string; openId: string | null; onFilterChange: (value: 'all' | HistoryType) => void; onFromChange: (value: string) => void; onToChange: (value: string) => void; onToggle: (id: string | null) => void; onDelete: (id: string) => void }) {
   const labels: Record<'all' | HistoryType, string> = { all: 'All scans', url_scan: 'URL Scan', website_reputation: 'Website Reputation', domain_age: 'Domain Age', ssl_certificate: 'SSL Certificate', malicious_url_database: 'Malicious URL Database', url_pattern_analysis: 'URL Pattern Analysis', visual_comparison: 'Visual Comparison', ocr: 'OCR' }
-  return <section className="mx-auto mt-10 max-w-2xl rounded-3xl bg-[linear-gradient(135deg,rgba(215,255,47,0.22),rgba(36,87,255,0.16))] p-1 text-left" aria-labelledby="history-heading">
+  return <section className="mx-auto mt-10 max-w-2xl rounded-3xl bg-white p-1 text-left" aria-labelledby="history-heading">
     <div className="flex items-center justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Scan History</p><h2 id="history-heading" className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Previous reports</h2></div><FileText className="text-slate-300" size={22} /></div>
     <div className="mt-4 flex flex-wrap gap-2">{(Object.keys(labels) as Array<'all' | HistoryType>).map((key) => <button key={key} type="button" onClick={() => onFilterChange(key)} className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${filter === key ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 text-slate-500 hover:border-slate-400'}`}>{labels[key]}</button>)}</div>
     <div className="mt-3 flex flex-wrap gap-2">
@@ -256,10 +256,10 @@ function Results({ result, explanation, loading }: { result: Result; explanation
         : 'bg-emerald-50 text-emerald-700'
 
   return (
-    <section aria-live="polite" className="mx-auto mt-12 max-w-2xl rounded-3xl bg-[linear-gradient(135deg,rgba(215,255,47,0.22),rgba(36,87,255,0.16))] p-1 text-left">
+    <section aria-live="polite" className="mx-auto mt-12 max-w-2xl rounded-3xl bg-white p-1 text-left">
       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6 sm:p-8">
         <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[linear-gradient(135deg,#d7ff2f,#2457ff)] text-slate-950 shadow-sm"><Sparkles size={17} /></span>
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 text-white shadow-sm"><Sparkles size={17} /></span>
           <div><p className="text-xs font-semibold uppercase tracking-widest text-slate-400">AI Security Explanation</p><p className="mt-1 text-sm text-slate-500">A cautious summary of the scan evidence.</p></div>
         </div>
         {loading ? <p className="mt-6 text-sm text-slate-500">Gemma is preparing an explanation…</p> : explanation?.available && explanation.explanation ? <div className="mt-6 whitespace-pre-wrap text-sm leading-7 text-slate-600">{explanation.explanation}</div> : <p className="mt-6 text-sm leading-6 text-slate-500">{explanation?.error || 'AI explanation is unavailable. Your scan results are still valid and unchanged.'}</p>}
