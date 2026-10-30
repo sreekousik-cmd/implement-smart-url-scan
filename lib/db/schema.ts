@@ -3,6 +3,7 @@ import { jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
 export const scanHistory = pgTable("scan_history", {
   id: uuid("id").defaultRandom().primaryKey(),
   visitorId: text("visitor_id").notNull(),
+  requestId: text("request_id"),
   scanType: text("scan_type").notNull(),
   scanDate: timestamp("scan_date", { withTimezone: true }).notNull().defaultNow(),
   target: text("target"),

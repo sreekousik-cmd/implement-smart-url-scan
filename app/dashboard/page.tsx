@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArrowRight, BarChart3, FileText, Gauge, History, ScanLine, ShieldAlert } from 'lucide-react'
 
-type ScanType = 'url_scan' | 'website_reputation' | 'visual_comparison' | 'ocr'
+type ScanType = 'url_scan' | 'website_reputation' | 'domain_age' | 'ssl_certificate' | 'malicious_url_database' | 'url_pattern_analysis' | 'visual_comparison' | 'ocr'
 type HistoryItem = { id: string; scanType: ScanType; scanDate: string; target: string | null; riskCategory: string; confidenceLevel: string; finalReport: string }
 type DashboardData = {
   totals: { totalScans: number; visualComparisons: number; suspiciousDetected: number; highRisk: number }
@@ -12,7 +12,7 @@ type DashboardData = {
   dailyCounts: Record<string, number>
   recent: HistoryItem[]
 }
-const typeLabels: Record<ScanType, string> = { url_scan: 'URL Scan', website_reputation: 'Website Reputation', visual_comparison: 'Visual Comparison', ocr: 'OCR' }
+const typeLabels: Record<ScanType, string> = { url_scan: 'URL Scan', website_reputation: 'Website Reputation', domain_age: 'Domain Age', ssl_certificate: 'SSL Certificate', malicious_url_database: 'Malicious URL Database', url_pattern_analysis: 'URL Pattern Analysis', visual_comparison: 'Visual Comparison', ocr: 'OCR' }
 const riskLabels = ['Low', 'Medium', 'High', 'Inconclusive']
 
 export default function DashboardPage() {

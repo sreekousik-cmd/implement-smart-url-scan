@@ -5,6 +5,11 @@ const MAX_BYTES = 5 * 1024 * 1024
 const ALLOWED_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
 
 type OCRReport = {
+  riskLevel: 'Likely legitimate' | 'Suspicious' | 'High risk' | 'Inconclusive'
+  confidence: string
+  identifiedBrand: string
+  identifiedDomain: string
+  limitations: string[]
   suspiciousText: string[]
   officialText: string[]
   matchingText: string[]
@@ -26,10 +31,16 @@ function cleanReport(value: unknown): OCRReport {
     const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
     return { text: String(row.text || '').slice(0, 180), presentOn: row.presentOn === 'official' ? 'official' as const : 'suspicious' as const }
   }).filter((item) => item.text) : []
+  const riskLevels = new Set(['Likely legitimate', 'Suspicious', 'High risk', 'Inconclusive'])
   return {
+    riskLevel: riskLevels.has(String(source.riskLevel)) ? String(source.riskLevel) as OCRReport['riskLevel'] : 'Inconclusive',
+    confidence: typeof source.confidence === 'string' ? source.confidence.slice(0, 80) : 'Low',
+    identifiedBrand: typeof source.identifiedBrand === 'string' ? source.identifiedBrand.slice(0, 160) : '',
+    identifiedDomain: typeof source.identifiedDomain === 'string' ? source.identifiedDomain.slice(0, 240) : '',
+    limitations: strings(source.limitations).slice(0, 10),
     suspiciousText: strings(source.suspiciousText), officialText: strings(source.officialText), matchingText: strings(source.matchingText),
     changedText: changed, missingText: missing, highlights: strings(source.highlights),
-    note: typeof source.note === 'string' ? source.note.slice(0, 500) : 'OCR detects visible text differences; it does not prove that either site is fraudulent.',
+    note: typeof source.note === 'string' ? source.note.slice(0, 500) : 'OCR detects visible details; it does not verify ownership or prove that a site is safe.',
   }
 }
 
@@ -38,17 +49,21 @@ export async function POST(request: Request) {
   if (!key) return NextResponse.json({ error: 'OCR service is not configured.' }, { status: 503 })
 
   const form = await request.formData()
+  const screenshot = form.get('screenshot')
   const suspicious = form.get('suspicious')
   const official = form.get('official')
-  if (!(suspicious instanceof File) || !(official instanceof File)) return NextResponse.json({ error: 'Upload both screenshots.' }, { status: 400 })
-  for (const file of [suspicious, official]) {
+  const singleScreenshot = screenshot instanceof File ? screenshot : null
+  if (!singleScreenshot && (!(suspicious instanceof File) || !(official instanceof File))) return NextResponse.json({ error: 'Upload a website screenshot.' }, { status: 400 })
+  for (const file of singleScreenshot ? [singleScreenshot] : [suspicious as File, official as File]) {
     if (!ALLOWED_TYPES.has(file.type) || file.size > MAX_BYTES) return NextResponse.json({ error: 'Use PNG, JPEG, or WebP images up to 5 MB each.' }, { status: 400 })
   }
 
   const toData = async (file: File) => ({ mimeType: file.type, data: Buffer.from(await file.arrayBuffer()).toString('base64') })
-  const [suspiciousImage, officialImage] = await Promise.all([toData(suspicious), toData(official)])
-  const prompt = `You are doing OCR and a cautious text comparison. Extract only clearly visible text from image 1 (suspicious) and image 2 (official). Compare brand names, headings, navigation, buttons, alerts, and messages. Return ONLY valid JSON with this shape: {"suspiciousText":[],"officialText":[],"matchingText":[],"changedText":[{"suspicious":"","official":"","reason":""}],"missingText":[{"text":"","presentOn":"suspicious|official"}],"highlights":[],"note":""}. Do not infer hidden text or declare phishing. Keep arrays concise. Image 1 follows, then image 2.`
-  const body = { contents: [{ parts: [{ text: prompt }, { inlineData: suspiciousImage }, { inlineData: officialImage }] }], generationConfig: { temperature: 0, maxOutputTokens: 1200, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'minimal' } } }
+  const images = await Promise.all((singleScreenshot ? [singleScreenshot] : [suspicious as File, official as File]).map(toData))
+  const prompt = singleScreenshot
+    ? `You are analysing one website screenshot cautiously. Extract only clearly visible text, website names, URLs, logos, product names, prices, and other details. Identify the claimed brand and domain only when visible or strongly supported. Assess suspicious branding, copied-looking layouts, misleading URLs, unrealistic discounts, and impersonation indicators without assuming unfamiliar means fake. Return ONLY valid JSON with this shape: {"riskLevel":"Likely legitimate|Suspicious|High risk|Inconclusive","confidence":"Low|Medium|High","identifiedBrand":"","identifiedDomain":"","limitations":[],"suspiciousText":[],"officialText":[],"matchingText":[],"changedText":[],"missingText":[],"highlights":[],"note":""}. A screenshot alone cannot verify ownership; use Inconclusive and ask for the website URL when it is insufficient. Do not fabricate OCR, brand matches, official references, or threat-intelligence results. Screenshot follows.`
+    : `You are doing OCR and a cautious text comparison. Extract only clearly visible text from image 1 (suspicious) and image 2 (official). Compare brand names, headings, navigation, buttons, alerts, and messages. Return ONLY valid JSON with riskLevel, confidence, identifiedBrand, identifiedDomain, limitations, and this shape: {"suspiciousText":[],"officialText":[],"matchingText":[],"changedText":[{"suspicious":"","official":"","reason":""}],"missingText":[{"text":"","presentOn":"suspicious|official"}],"highlights":[],"note":""}. Do not infer hidden text or declare phishing. Keep arrays concise. Image 1 follows, then image 2.`
+  const body = { contents: [{ parts: [{ text: prompt }, ...images.map((image) => ({ inlineData: image }))] }], generationConfig: { temperature: 0, maxOutputTokens: 1400, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'minimal' } } }
 
   try {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${encodeURIComponent(key)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) })

@@ -8,9 +8,9 @@ type Status = 'passed' | 'warning' | 'failed' | 'unavailable'
 type Indicator = { label: string; status: Status; explanation: string; evidence: string }
 type Result = { normalizedUrl: string; risk: string; riskScore: number; indicators: Indicator[]; note: string }
 type Explanation = { available: boolean; explanation?: string; error?: string }
-type HistoryType = 'url_scan' | 'website_reputation' | 'visual_comparison' | 'ocr'
+type HistoryType = 'url_scan' | 'website_reputation' | 'domain_age' | 'ssl_certificate' | 'malicious_url_database' | 'url_pattern_analysis' | 'visual_comparison' | 'ocr'
 type HistoryRecord = { id: string; scanType: HistoryType; scanDate: string; target: string | null; riskCategory: string; confidenceLevel: string; finalReport: string; findings: Record<string, unknown> }
-type OCRReport = { suspiciousText: string[]; officialText: string[]; matchingText: string[]; changedText: { suspicious: string; official: string; reason: string }[]; missingText: { text: string; presentOn: 'suspicious' | 'official' }[]; highlights: string[]; note: string }
+type OCRReport = { riskLevel: 'Likely legitimate' | 'Suspicious' | 'High risk' | 'Inconclusive'; confidence: string; identifiedBrand: string; identifiedDomain: string; limitations: string[]; suspiciousText: string[]; officialText: string[]; matchingText: string[]; changedText: { suspicious: string; official: string; reason: string }[]; missingText: { text: string; presentOn: 'suspicious' | 'official' }[]; highlights: string[]; note: string }
 
 const statusMeta = {
   passed: { label: 'Passed', icon: Check, className: 'text-emerald-700 bg-emerald-50' },
@@ -28,18 +28,24 @@ export default function Page() {
   const [explanationLoading, setExplanationLoading] = useState(false)
   const [history, setHistory] = useState<HistoryRecord[]>([])
   const [historyFilter, setHistoryFilter] = useState<'all' | HistoryType>('all')
+  const [historyFrom, setHistoryFrom] = useState('')
+  const [historyTo, setHistoryTo] = useState('')
   const [historyLoading, setHistoryLoading] = useState(true)
   const [historyError, setHistoryError] = useState('')
   const [openHistoryId, setOpenHistoryId] = useState<string | null>(null)
-  const [comparisonFiles, setComparisonFiles] = useState<{ suspicious: File | null; official: File | null }>({ suspicious: null, official: null })
+  const [comparisonFile, setComparisonFile] = useState<File | null>(null)
   const [comparison, setComparison] = useState<OCRReport | null>(null)
   const [comparisonLoading, setComparisonLoading] = useState(false)
   const [comparisonError, setComparisonError] = useState('')
 
-  async function loadHistory(filter = historyFilter) {
+  async function loadHistory(filter = historyFilter, from = historyFrom, to = historyTo) {
     setHistoryLoading(true)
     try {
-      const query = filter === 'all' ? '' : `?type=${filter}`
+      const params = new URLSearchParams()
+      if (filter !== 'all') params.set('type', filter)
+      if (from) params.set('from', from)
+      if (to) params.set('to', to)
+      const query = params.toString() ? `?${params.toString()}` : ''
       const response = await fetch(`/api/history${query}`)
       const data = await response.json()
       if (!response.ok) throw new Error(data.error)
@@ -52,9 +58,9 @@ export default function Page() {
     }
   }
 
-  useEffect(() => { void loadHistory() }, [historyFilter])
+  useEffect(() => { void loadHistory() }, [historyFilter, historyFrom, historyTo])
 
-  async function saveScanHistory(record: { scanType: HistoryType; target?: string; riskCategory: string; confidenceLevel: string; finalReport: string; findings: Record<string, unknown> }) {
+  async function saveScanHistory(record: { scanType: HistoryType; requestId?: string; target?: string; riskCategory: string; confidenceLevel: string; finalReport: string; findings: Record<string, unknown> }) {
     try {
       const response = await fetch('/api/history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record) })
       const data = await response.json().catch(() => null)
@@ -102,34 +108,34 @@ export default function Page() {
 
   async function handleComparison(event: FormEvent) {
     event.preventDefault()
-    if (!comparisonFiles.suspicious || !comparisonFiles.official) return
+    if (!comparisonFile) return
     setComparisonLoading(true)
     setComparisonError('')
     setComparison(null)
+    const requestId = crypto.randomUUID()
     try {
-      const [suspicious, official] = await Promise.all([
-        compressScreenshot(comparisonFiles.suspicious),
-        compressScreenshot(comparisonFiles.official),
-      ])
+      const screenshot = await compressScreenshot(comparisonFile)
       const form = new FormData()
-      form.set('suspicious', suspicious)
-      form.set('official', official)
+      form.set('screenshot', screenshot)
       const response = await fetch('/api/compare', { method: 'POST', body: form })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error)
       setComparison(data.report)
-      const riskCategory = data.report.changedText.length || data.report.missingText.length ? 'Review differences' : 'No text differences found'
+      const riskCategory = data.report.riskLevel
+      const report = `${data.report.note}\n\nConfidence: ${data.report.confidence}${data.report.identifiedDomain ? `\nIdentified domain: ${data.report.identifiedDomain}` : ''}`
       const comparisonRecord = {
         target: 'Screenshot comparison',
         riskCategory,
         confidenceLevel: 'Medium',
-        finalReport: data.report.note,
+        finalReport: report,
         findings: data.report,
       }
-      await saveScanHistory({ ...comparisonRecord, scanType: 'visual_comparison' })
-      await saveScanHistory({ ...comparisonRecord, scanType: 'ocr' })
+      await saveScanHistory({ ...comparisonRecord, requestId: `${requestId}:visual_comparison`, scanType: 'visual_comparison' })
+      await saveScanHistory({ ...comparisonRecord, requestId: `${requestId}:ocr`, scanType: 'ocr' })
     } catch (comparisonError) {
-      setComparisonError(comparisonError instanceof Error ? comparisonError.message : 'Unable to compare these screenshots.')
+      const message = comparisonError instanceof Error ? comparisonError.message : 'Unable to compare these screenshots.'
+      setComparisonError(message)
+      await Promise.all(['visual_comparison', 'ocr'].map((scanType) => saveScanHistory({ requestId: `${requestId}:${scanType}`, scanType: scanType as 'visual_comparison' | 'ocr', target: 'Screenshot comparison', riskCategory: 'Unable to verify', confidenceLevel: 'Low', finalReport: message, findings: { status: 'Unable to verify', error: message } })))
     } finally {
       setComparisonLoading(false)
     }
@@ -138,6 +144,7 @@ export default function Page() {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
     setLoading(true); setError(''); setResult(null); setExplanation(null)
+    const requestId = crypto.randomUUID()
     try {
       const response = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) })
       const data = await response.json()
@@ -150,42 +157,37 @@ export default function Page() {
         setExplanation(explanationData)
           const report = `${explanationData.available ? explanationData.explanation : data.note}\n\nRisk score: ${data.riskScore}/100 (higher means more risk).`
           const findings = { riskScore: data.riskScore, indicators: data.indicators }
-          await saveScanHistory({
-            scanType: 'url_scan',
+          const confidenceLevel = data.indicators.some((item: Indicator) => item.status === 'unavailable') ? 'Medium' : 'High'
+          const activityLabels: Record<Exclude<HistoryType, 'url_scan' | 'website_reputation' | 'visual_comparison' | 'ocr'>, string[]> = {
+            domain_age: ['Domain age'],
+            ssl_certificate: ['SSL certificate'],
+            malicious_url_database: ['Phishing detection'],
+            url_pattern_analysis: ['URL analysis'],
+          }
+          const activityTypes: HistoryType[] = ['url_scan', 'website_reputation', 'domain_age', 'ssl_certificate', 'malicious_url_database', 'url_pattern_analysis']
+          await Promise.all(activityTypes.map((scanType) => saveScanHistory({
+            requestId: `${requestId}:${scanType}`,
+            scanType,
             target: data.normalizedUrl,
             riskCategory: data.risk,
-            confidenceLevel: data.indicators.some((item: Indicator) => item.status === 'unavailable') ? 'Medium' : 'High',
+            confidenceLevel,
             finalReport: report,
-            findings,
-          })
-          await saveScanHistory({
-            scanType: 'website_reputation',
-            target: data.normalizedUrl,
-            riskCategory: data.risk,
-            confidenceLevel: data.indicators.some((item: Indicator) => item.status === 'unavailable') ? 'Medium' : 'High',
-            finalReport: report,
-            findings: { indicators: data.indicators.filter((item: Indicator) => ['Website reputation', 'Phishing detection', 'Trusted brand reputation'].includes(item.label)) },
-          })
+            findings: { ...findings, indicators: scanType === 'url_scan' ? data.indicators : data.indicators.filter((item: Indicator) => (scanType === 'website_reputation' ? ['Website reputation', 'Trusted brand reputation'].includes(item.label) : activityLabels[scanType as keyof typeof activityLabels]?.includes(item.label))) },
+          })))
       } catch {
         const fallback = { available: false, error: 'Gemma is temporarily unavailable. The scan results are still available.' }
         setExplanation(fallback)
         const report = `${data.note}\n\nRisk score: ${data.riskScore}/100 (higher means more risk).`
         const findings = { riskScore: data.riskScore, indicators: data.indicators }
-        await saveScanHistory({ scanType: 'url_scan', target: data.normalizedUrl, riskCategory: data.risk, confidenceLevel: 'Medium', finalReport: report, findings })
-        await saveScanHistory({ scanType: 'website_reputation', target: data.normalizedUrl, riskCategory: data.risk, confidenceLevel: 'Medium', finalReport: report, findings: { riskScore: data.riskScore, indicators: data.indicators.filter((item: Indicator) => ['Website reputation', 'Phishing detection', 'Trusted brand reputation'].includes(item.label)) } })
+        const activityTypes: HistoryType[] = ['url_scan', 'website_reputation', 'domain_age', 'ssl_certificate', 'malicious_url_database', 'url_pattern_analysis']
+        await Promise.all(activityTypes.map((scanType) => saveScanHistory({ requestId: `${requestId}:${scanType}`, scanType, target: data.normalizedUrl, riskCategory: data.risk, confidenceLevel: 'Medium', finalReport: report, findings })))
       }
     } catch (scanError) {
     const message = scanError instanceof Error ? scanError.message : 'Unable to scan this URL.'
     setError(message)
     if (url.trim()) {
-      await saveScanHistory({
-        scanType: 'url_scan',
-        target: url.trim(),
-        riskCategory: 'Unknown',
-        confidenceLevel: 'Low',
-        finalReport: message,
-        findings: { status: 'Unknown', error: message },
-      })
+      const activityTypes: HistoryType[] = ['url_scan', 'website_reputation', 'domain_age', 'ssl_certificate', 'malicious_url_database', 'url_pattern_analysis']
+      await Promise.all(activityTypes.map((scanType) => saveScanHistory({ requestId: `${requestId}:${scanType}`, scanType, target: url.trim(), riskCategory: 'Unknown', confidenceLevel: 'Low', finalReport: message, findings: { status: 'Unknown', error: message } })))
     }
   } finally { setLoading(false); setExplanationLoading(false) }
   }
@@ -210,31 +212,35 @@ export default function Page() {
         </form>
         {error && <p role="alert" className="mt-4 text-sm font-medium text-red-600">{error}</p>}
         {result && <Results result={result} explanation={explanation} loading={explanationLoading} />}
-        <ComparisonPanel files={comparisonFiles} report={comparison} loading={comparisonLoading} error={comparisonError} onFilesChange={setComparisonFiles} onSubmit={handleComparison} />
-        <HistoryPanel records={history} filter={historyFilter} loading={historyLoading} error={historyError} openId={openHistoryId} onFilterChange={setHistoryFilter} onToggle={setOpenHistoryId} onDelete={handleDeleteHistory} />
+        <ComparisonPanel file={comparisonFile} report={comparison} loading={comparisonLoading} error={comparisonError} onFileChange={setComparisonFile} onSubmit={handleComparison} />
+        <HistoryPanel records={history} filter={historyFilter} from={historyFrom} to={historyTo} loading={historyLoading} error={historyError} openId={openHistoryId} onFilterChange={setHistoryFilter} onFromChange={setHistoryFrom} onToChange={setHistoryTo} onToggle={setOpenHistoryId} onDelete={handleDeleteHistory} />
       </section>
     </main>
   )
 }
 
-function ComparisonPanel({ files, report, loading, error, onFilesChange, onSubmit }: { files: { suspicious: File | null; official: File | null }; report: OCRReport | null; loading: boolean; error: string; onFilesChange: (files: { suspicious: File | null; official: File | null }) => void; onSubmit: (event: FormEvent) => void }) {
+function ComparisonPanel({ file, report, loading, error, onFileChange, onSubmit }: { file: File | null; report: OCRReport | null; loading: boolean; error: string; onFileChange: (file: File | null) => void; onSubmit: (event: FormEvent) => void }) {
   return <section className="mx-auto mt-10 max-w-2xl text-left" aria-labelledby="comparison-heading">
-    <div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-700"><Upload size={17} /></span><div><p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Visual comparison</p><h2 id="comparison-heading" className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Compare visible text</h2></div></div>
-    <p className="mt-2 text-sm leading-6 text-slate-500">Upload a suspicious screenshot and an official reference. OCR extracts visible text and highlights differences without declaring either site fraudulent.</p>
-    <form onSubmit={onSubmit} className="mt-5 grid gap-3 sm:grid-cols-2">
-      {(['suspicious', 'official'] as const).map((key) => <label key={key} className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm font-medium text-slate-700"><span className="block">{key === 'suspicious' ? 'Suspicious screenshot' : 'Official screenshot'}</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onFilesChange({ ...files, [key]: event.target.files?.[0] || null })} className="mt-3 block w-full text-xs text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-950 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-white" /></label>)}
-      <button type="submit" disabled={loading || !files.suspicious || !files.official} className="h-12 rounded-xl bg-slate-950 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 sm:col-span-2">{loading ? 'Reading screenshots…' : 'Compare screenshots'}</button>
+    <div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-700"><Upload size={17} /></span><div><p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Visual website analysis</p><h2 id="comparison-heading" className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Verify a website screenshot</h2></div></div>
+    <p className="mt-2 text-sm leading-6 text-slate-500">Upload one screenshot. OCR extracts visible details and checks for cautious impersonation indicators without assuming an unfamiliar site is fake.</p>
+    <form onSubmit={onSubmit} className="mt-5 grid gap-3">
+      <label className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm font-medium text-slate-700"><span className="block">Upload Website Screenshot</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onFileChange(event.target.files?.[0] || null)} className="mt-3 block w-full text-xs text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-950 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-white" /></label>
+      <button type="submit" disabled={loading || !file} className="h-12 rounded-xl bg-slate-950 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50">{loading ? 'Analysing screenshot…' : 'Analyse screenshot'}</button>
     </form>
     {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
-    {report && <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 text-sm leading-6 text-slate-600"><p className="font-semibold text-slate-800">OCR comparison report</p>{report.highlights.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-5">{report.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul>}<p className="mt-4 border-t border-slate-100 pt-4">{report.note}</p>{report.changedText.length > 0 && <div className="mt-4"><p className="font-semibold text-slate-800">Changed text</p>{report.changedText.map((change, index) => <p key={`${change.suspicious}-${index}`} className="mt-2 text-sm"><span className="font-medium">{change.suspicious || '—'}</span> → <span className="font-medium">{change.official || '—'}</span><span className="block text-xs text-slate-400">{change.reason}</span></p>)}</div>}</div>}
+    {report && <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 text-sm leading-6 text-slate-600"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-slate-800">Screenshot analysis</p><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">{report.riskLevel}</span></div><p className="mt-2 text-xs text-slate-500">Confidence: {report.confidence}{report.identifiedBrand ? ` · Claimed brand: ${report.identifiedBrand}` : ''}{report.identifiedDomain ? ` · Domain: ${report.identifiedDomain}` : ''}</p>{report.highlights.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-5">{report.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul>}{report.suspiciousText.length > 0 && <div className="mt-4"><p className="font-semibold text-slate-800">Visible text</p><p className="mt-1 text-sm">{report.suspiciousText.join(' · ')}</p></div>}<p className="mt-4 border-t border-slate-100 pt-4">{report.note}</p>{report.limitations.length > 0 && <div className="mt-3"><p className="font-semibold text-slate-800">Limitations</p><ul className="list-disc pl-5">{report.limitations.map((item) => <li key={item}>{item}</li>)}</ul></div>}</div>}
   </section>
 }
 
-function HistoryPanel({ records, filter, loading, error, openId, onFilterChange, onToggle, onDelete }: { records: HistoryRecord[]; filter: 'all' | HistoryType; loading: boolean; error: string; openId: string | null; onFilterChange: (value: 'all' | HistoryType) => void; onToggle: (id: string | null) => void; onDelete: (id: string) => void }) {
-  const labels: Record<'all' | HistoryType, string> = { all: 'All scans', url_scan: 'URL Scan', website_reputation: 'Website Reputation', visual_comparison: 'Visual Comparison', ocr: 'OCR' }
+function HistoryPanel({ records, filter, from, to, loading, error, openId, onFilterChange, onFromChange, onToChange, onToggle, onDelete }: { records: HistoryRecord[]; filter: 'all' | HistoryType; from: string; to: string; loading: boolean; error: string; openId: string | null; onFilterChange: (value: 'all' | HistoryType) => void; onFromChange: (value: string) => void; onToChange: (value: string) => void; onToggle: (id: string | null) => void; onDelete: (id: string) => void }) {
+  const labels: Record<'all' | HistoryType, string> = { all: 'All scans', url_scan: 'URL Scan', website_reputation: 'Website Reputation', domain_age: 'Domain Age', ssl_certificate: 'SSL Certificate', malicious_url_database: 'Malicious URL Database', url_pattern_analysis: 'URL Pattern Analysis', visual_comparison: 'Visual Comparison', ocr: 'OCR' }
   return <section className="mx-auto mt-10 max-w-2xl text-left" aria-labelledby="history-heading">
     <div className="flex items-center justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Scan History</p><h2 id="history-heading" className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Previous reports</h2></div><FileText className="text-slate-300" size={22} /></div>
     <div className="mt-4 flex flex-wrap gap-2">{(Object.keys(labels) as Array<'all' | HistoryType>).map((key) => <button key={key} type="button" onClick={() => onFilterChange(key)} className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${filter === key ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 text-slate-500 hover:border-slate-400'}`}>{labels[key]}</button>)}</div>
+    <div className="mt-3 flex flex-wrap gap-2">
+      <label className="text-xs text-slate-500">From <input type="date" value={from} onChange={(event) => onFromChange(event.target.value)} className="ml-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-700" /></label>
+      <label className="text-xs text-slate-500">To <input type="date" value={to} onChange={(event) => onToChange(event.target.value)} className="ml-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-700" /></label>
+    </div>
     {error && <p role="alert" className="mt-4 text-sm text-amber-700">{error}</p>}
     {loading ? <p className="mt-5 text-sm text-slate-500">Loading saved reports…</p> : records.length === 0 ? <p className="mt-5 rounded-xl border border-dashed border-slate-200 p-5 text-sm text-slate-500">No saved reports in this filter.</p> : <div className="mt-5 divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white">{records.map((record) => <div key={record.id} className="p-4"><div className="flex items-start gap-3"><button type="button" onClick={() => onToggle(openId === record.id ? null : record.id)} className="min-w-0 flex-1 text-left"><p className="text-sm font-semibold text-slate-800">{labels[record.scanType]}</p><p className="mt-1 truncate text-xs text-slate-500">{record.target || 'Saved report'}</p><p className="mt-1 text-xs text-slate-400">{new Date(record.scanDate).toLocaleString()} · {record.riskCategory} · {record.confidenceLevel} confidence{typeof record.findings.riskScore === 'number' ? ` · Risk score ${record.findings.riskScore}/100` : ''}</p></button><button type="button" aria-label={`Delete ${labels[record.scanType]} report`} onClick={() => onDelete(record.id)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={16} /></button></div>{openId === record.id && <div className="mt-4 border-t border-slate-100 pt-4 text-sm leading-6 text-slate-600"><p className="whitespace-pre-wrap">{record.finalReport}</p></div>}</div>)}</div>}
   </section>
