@@ -193,7 +193,7 @@ export default function Page() {
   }
 
   return (
-    <main className="min-h-screen bg-[#F1F7F6] text-slate-950">
+    <main className="three-dimensional-background min-h-screen text-slate-950">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-6 py-7">
         <Link href="/" className="flex items-center gap-2.5"><img src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-TMC6J8OtTrw06fQx00D797ADPNMbbv.png" alt="FindFake AI logo" className="h-12 w-12 rounded-lg object-cover" /><span className="text-2xl font-semibold tracking-tight sm:text-3xl">FindFake<span className="text-slate-400"> AI</span></span></Link>
         <nav className="flex items-center gap-2 text-xs font-medium sm:text-sm">
