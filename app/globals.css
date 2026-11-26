@@ -153,6 +153,28 @@
   }
 }
 
+.three-dimensional-background {
+  position: relative;
+  isolation: isolate;
+  background-color: #F1F7F6;
+  background-image: linear-gradient(145deg, #F1F7F6 0%, #EAF3F1 52%, #F5F9F8 100%);
+}
+
+.three-dimensional-background::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  content: '';
+  background:
+    radial-gradient(ellipse at 18% 14%, rgb(131 196 185 / 24%), transparent 28%),
+    radial-gradient(ellipse at 86% 26%, rgb(36 87 255 / 9%), transparent 25%),
+    radial-gradient(ellipse at 58% 72%, rgb(215 255 47 / 10%), transparent 30%),
+    radial-gradient(ellipse at 50% 100%, rgb(255 255 255 / 75%), transparent 45%),
+    linear-gradient(180deg, rgb(241 247 246 / 56%), rgb(241 247 246 / 64%)),
+    url('/binary-waterfall-background.jpg') center / cover no-repeat;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
